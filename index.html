@@ -1590,8 +1590,8 @@ async function renderDashboard() {
         <div class="today-cards" id="todayCards">
   `;
 
-  // 四台设备卡片
-  DEVICES.forEach(async device => {
+  // 四台设备卡片（先收集所有数据再渲染）
+  for (const device of DEVICES) {
     const record = await getRecord(device.id, today);
     const checked = !!record;
     let statusClass = 'unchecked';
@@ -1626,7 +1626,7 @@ async function renderDashboard() {
         </div>
       </div>
     `;
-  });
+  }
 
   html += `
         </div>
@@ -1712,7 +1712,7 @@ async function renderDashboard() {
     let detailHtml = `<h3>${dateStr} 点检详情</h3>`;
 
     let hasAny = false;
-    DEVICES.forEach(async device => {
+    for (const device of DEVICES) {
       const record = await getRecord(device.id, dateStr);
       if (record) {
         hasAny = true;
@@ -1740,7 +1740,7 @@ async function renderDashboard() {
         });
         detailHtml += '</div>';
       }
-    });
+    }
 
     if (!hasAny) {
       detailHtml += '<p class="empty-text">当天无点检记录</p>';
@@ -1794,7 +1794,7 @@ async function renderHistory(deviceId) {
     html += '<div class="empty-state"><p>暂无点检记录</p></div>';
   } else {
     html += '<div class="history-list">';
-    dates.forEach(async dateStr => {
+    for (const dateStr of dates) {
       const record = await getRecord(deviceId, dateStr);
       const items = record.items || {};
       const abnormalCount = Object.values(items).filter(i => i.status === 'abnormal').length;
@@ -1824,7 +1824,7 @@ async function renderHistory(deviceId) {
           </div>
         </div>
       `;
-    });
+    }
     html += '</div>';
   }
 
