@@ -1362,6 +1362,14 @@ function renderCheckForm(deviceId) {
 
   document.getElementById('app').innerHTML = html;
 
+  // 双重保险：移除任何可能残留的返回链接
+  setTimeout(() => {
+    const appEl = document.getElementById('app');
+    if (appEl) {
+      appEl.querySelectorAll('.back-btn, a[href*="dashboard"], a[href*="history"], a[href*="export"], a[href*="manage"]').forEach(el => el.remove());
+    }
+  }, 50);
+
   // 实时更新时间
   setInterval(() => {
     const el = document.getElementById('liveTime');
@@ -1466,6 +1474,7 @@ function renderCheckForm(deviceId) {
     // 显示成功
     const formEl = document.getElementById('checkForm');
     formEl.innerHTML = `
+      <div class="check-lock-notice" style="text-align:center; padding:8px; margin-bottom:12px; background:#fef3c7; border-radius:6px; font-size:0.8rem; color:#92400e;">🔒 点检专用页面</div>
       <div class="success-state">
         <div class="success-icon">✅</div>
         <h2>点检提交成功！</h2>
