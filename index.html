@@ -1228,33 +1228,35 @@ async function supabaseFetch(path, options) {
     headers: headers,
     body: options.body
   });
-  if (!resp.ok) {
-    var err = await resp.text();
-    throw new Error("API error " + resp.status + ": " + err);
-  }
   return resp;
 }
 
 async function supabaseQuery(table, query) {
   var resp = await supabaseFetch(table + "?" + query);
+  if (!resp.ok) { var err = await resp.text(); throw new Error("Query error " + resp.status + ": " + err); }
   return resp.json();
 }
 
 async function supabaseUpsert(table, data, conflictCols) {
+  // 先尝试 POST
   var resp = await supabaseFetch(table, {
     method: "POST",
     headers: { "Prefer": "return=representation" },
     body: JSON.stringify(data)
   });
+  
+  // 409 = 唯一约束冲突，先删后插
   if (resp.status === 409) {
     var cols = conflictCols.split(",");
-    var filter = cols.map(function(c) { return c + "=eq." + encodeURIComponent(data[c]); }).join("&");
-    resp = await supabaseFetch(table + "?" + filter, {
-      method: "PATCH",
+    var filter = cols.map(function(c) { return c + "=eq." + data[c]; }).join("&");
+    await supabaseFetch(table + "?" + filter, { method: "DELETE" });
+    resp = await supabaseFetch(table, {
+      method: "POST",
       headers: { "Prefer": "return=representation" },
       body: JSON.stringify(data)
     });
   }
+  
   return resp.json();
 }
 
@@ -1309,7 +1311,7 @@ async function saveRecord(deviceId, dateStr, data) {
       items: data.items
     }, "device_id,check_date");
     return true;
-  } catch (e) { console.error("saveRecord:", e); alert("保存失败！请检查网络。"); return false; }
+  } catch (e) { console.error("saveRecord:", e); alert("保存失败：" + e.message); return false; }
 }
 
 /** 获取某设备所有记录日期 */
