@@ -1161,6 +1161,19 @@ a:hover { text-decoration: underline; }
   </div>
 
   <script>
+
+// ===== 版本控制：自动绕过缓存 =====
+var APP_VERSION = "20260717002";
+(function() {
+  // 如果 URL 没有版本参数，自动加上
+  if (window.location.search.indexOf("v=") === -1) {
+    var sep = window.location.search ? "&" : "?";
+    var newUrl = window.location.href.split("#")[0] + window.location.search + sep + "v=" + APP_VERSION;
+    if (window.location.hash) newUrl += window.location.hash;
+    window.location.replace(newUrl);
+  }
+})();
+
 /**
  * 设备配置数据
  * 修改此文件即可更新设备信息和点检项目
