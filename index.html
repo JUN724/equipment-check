@@ -1132,6 +1132,25 @@ a:hover { text-decoration: underline; }
   color: var(--gray-600);
 }
 
+  
+.check-status-hint {
+  margin-top: 8px;
+  padding: 8px 12px;
+  border-radius: 6px;
+  font-size: 0.82rem;
+  font-weight: 500;
+}
+.check-status-hint.warned {
+  background: #fef3c7;
+  color: #92400e;
+  border: 1px solid #fcd34d;
+}
+.check-status-hint.ok {
+  background: #d1fae5;
+  color: #065f46;
+  border: 1px solid #6ee7b7;
+}
+
   </style>
 </head>
 <body>
@@ -1503,6 +1522,7 @@ function renderCheckForm(deviceId) {
         <div class="device-name">${device.name}</div>
         <div class="device-model">型号：${device.model}</div>
         <div class="check-time" id="liveTime">点检时间：${now}</div>
+        <div class="check-status-hint" id="todayStatus">检查中...</div>
       </div>
 
       <div class="check-identity">
@@ -1555,6 +1575,23 @@ function renderCheckForm(deviceId) {
   `;
 
   document.getElementById('app').innerHTML = html;
+
+  // 检查今日是否已点检
+  getRecord(deviceId, getTodayStr()).then(function(rec) {
+    var hint = document.getElementById('todayStatus');
+    if (hint) {
+      if (rec) {
+        var tech = rec.technician || '未知';
+        var shift = rec.shift || '';
+        var shiftIcon = shift === '夜班' ? '🌙' : '☀️';
+        hint.innerHTML = '⚠️ 今日已由 <b>' + tech + '</b>（' + shiftIcon + ' ' + shift + '）点检过！<br>再次提交将覆盖之前的记录。';
+        hint.className = 'check-status-hint warned';
+      } else {
+        hint.innerHTML = '✅ 今日尚未点检，请完成点检后提交。';
+        hint.className = 'check-status-hint ok';
+      }
+    }
+  });
 
   // 双重保险：移除任何可能残留的返回链接
   setTimeout(() => {
@@ -2337,6 +2374,25 @@ async function generateReport(year, month) {
 .cell-tech, .cell-shift {
   font-size: 0.75rem;
   color: var(--gray-600);
+}
+
+  
+.check-status-hint {
+  margin-top: 8px;
+  padding: 8px 12px;
+  border-radius: 6px;
+  font-size: 0.82rem;
+  font-weight: 500;
+}
+.check-status-hint.warned {
+  background: #fef3c7;
+  color: #92400e;
+  border: 1px solid #fcd34d;
+}
+.check-status-hint.ok {
+  background: #d1fae5;
+  color: #065f46;
+  border: 1px solid #6ee7b7;
 }
 
   </style></head>
