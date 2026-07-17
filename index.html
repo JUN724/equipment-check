@@ -1037,6 +1037,38 @@ a:hover { text-decoration: underline; }
   transition: transform 0.2s;
 }
 
+  
+/* --- Photo Modal --- */
+.photo-modal {
+  display: none;
+  position: fixed;
+  top: 0; left: 0; right: 0; bottom: 0;
+  background: rgba(0,0,0,0.9);
+  z-index: 9999;
+  justify-content: center;
+  align-items: center;
+  flex-direction: column;
+}
+.photo-modal.show { display: flex; }
+.photo-modal img {
+  max-width: 95vw;
+  max-height: 85vh;
+  border-radius: 8px;
+}
+.photo-modal-close {
+  position: absolute;
+  top: 20px; right: 30px;
+  color: white;
+  font-size: 36px;
+  cursor: pointer;
+  font-weight: bold;
+}
+.photo-modal-hint {
+  color: #ccc;
+  margin-top: 12px;
+  font-size: 0.85rem;
+}
+
   </style>
 </head>
 <body>
@@ -1784,7 +1816,7 @@ async function renderDashboard() {
               <span>${item.status === 'normal' ? '✓' : '✗'}</span>
               <span>${check}</span>
               ${item.note ? `<span class="detail-note">${item.note}</span>` : ''}
-              ${item.photos && item.photos.length > 0 ? `<span class="detail-photos">📷${item.photos.length}张</span><div class="detail-photo-imgs">${item.photos.map(function(p){ return '<img src="'+p+'" class="detail-thumb" onclick="window.open(this.src)">'; }).join('')}</div>` : ''}
+              ${item.photos && item.photos.length > 0 ? `<span class="detail-photos">📷${item.photos.length}张</span><div class="detail-photo-imgs">${item.photos.map(function(p){ return '<img src="'+p+'" class="detail-thumb" onclick="showPhotoModal(this.src)">'; }).join('')}</div>` : ''}
             </div>
           `;
         });
@@ -1866,7 +1898,7 @@ async function renderHistory(deviceId) {
             <span class="item-status">${item.status === 'normal' ? '✓' : '✗'}</span>
             <span class="item-text">${check}</span>
             ${item.note ? `<span class="item-note">备注：${item.note}</span>` : ''}
-            ${item.photos && item.photos.length > 0 ? `<div class="history-photos">${item.photos.map(function(p){ return '<img src="'+p+'" class="history-thumb" onclick="window.open(this.src)">'; }).join('')}</div>` : ''}
+            ${item.photos && item.photos.length > 0 ? `<div class="history-photos">${item.photos.map(function(p){ return '<img src="'+p+'" class="history-thumb" onclick="showPhotoModal(this.src)">'; }).join('')}</div>` : ''}
           </div>
         `;
       });
@@ -2108,6 +2140,38 @@ async function generateReport(year, month) {
 .detail-thumb:hover, .history-thumb:hover {
   transform: scale(1.1);
   transition: transform 0.2s;
+}
+
+  
+/* --- Photo Modal --- */
+.photo-modal {
+  display: none;
+  position: fixed;
+  top: 0; left: 0; right: 0; bottom: 0;
+  background: rgba(0,0,0,0.9);
+  z-index: 9999;
+  justify-content: center;
+  align-items: center;
+  flex-direction: column;
+}
+.photo-modal.show { display: flex; }
+.photo-modal img {
+  max-width: 95vw;
+  max-height: 85vh;
+  border-radius: 8px;
+}
+.photo-modal-close {
+  position: absolute;
+  top: 20px; right: 30px;
+  color: white;
+  font-size: 36px;
+  cursor: pointer;
+  font-weight: bold;
+}
+.photo-modal-hint {
+  color: #ccc;
+  margin-top: 12px;
+  font-size: 0.85rem;
 }
 
   </style></head>
@@ -2397,6 +2461,18 @@ function navigate() {
 }
 
 /** 初始化 */
+
+function showPhotoModal(src) {
+  var existing = document.getElementById('photoModal');
+  if (existing) existing.remove();
+  var modal = document.createElement('div');
+  modal.id = 'photoModal';
+  modal.className = 'photo-modal show';
+  modal.innerHTML = '<span class="photo-modal-close" onclick="this.parentElement.remove()">&times;</span><img src="' + src + '"><div class="photo-modal-hint">点击 × 或图片外区域关闭</div>';
+  modal.addEventListener('click', function(e) { if (e.target === modal) modal.remove(); });
+  document.body.appendChild(modal);
+}
+
 function initApp() {
   // 监听 hash 变化
   window.addEventListener('hashchange', function(e) {
