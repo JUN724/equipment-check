@@ -1151,6 +1151,13 @@ a:hover { text-decoration: underline; }
   border: 1px solid #6ee7b7;
 }
 
+  
+.clean-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
   </style>
 </head>
 <body>
@@ -1163,7 +1170,7 @@ a:hover { text-decoration: underline; }
   <script>
 
 // ===== 版本控制：自动绕过缓存 =====
-var APP_VERSION = "20260717002";
+var APP_VERSION = "20260717003";
 (function() {
   // 如果 URL 没有版本参数，自动加上
   if (window.location.search.indexOf("v=") === -1) {
@@ -2408,6 +2415,13 @@ async function generateReport(year, month) {
   border: 1px solid #6ee7b7;
 }
 
+  
+.clean-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
   </style></head>
         <body>${reportHtml}</body>
       </html>
@@ -2503,7 +2517,16 @@ async function renderManage() {
         <div class="data-actions">
           <button class="btn btn-primary" id="btnExportData">📥 导出数据备份</button>
           <button class="btn btn-outline" id="btnImportData">📤 导入数据备份</button>
-          <button class="btn btn-outline" id="btnCleanOld">🧹 清理90天前数据</button>
+          <div class="clean-row">
+            <button class="btn btn-outline" id="btnCleanOld">🧹 清理旧数据</button>
+            <select class="select-input" id="cleanDays">
+              <option value="30">30天前</option>
+              <option value="60" selected>60天前</option>
+              <option value="90">90天前</option>
+              <option value="180">180天前</option>
+              <option value="365">1年前</option>
+            </select>
+          </div>
           <button class="btn btn-danger" id="btnClearAll">🗑️ 清除所有数据</button>
         </div>
         <input type="file" id="importFileInput" accept=".json" style="display:none;">
@@ -2560,9 +2583,10 @@ async function renderManage() {
   });
 
   document.getElementById('btnCleanOld').addEventListener('click', async () => {
-    if (confirm('将清理90天之前的点检数据，建议先导出备份。确定继续？')) {
-      await cleanOldData(90);
-      alert('已清理90天前的旧记录。');
+    var days = parseInt(document.getElementById('cleanDays').value);
+    if (confirm('将清理 ' + days + ' 天之前的点检数据，建议先导出备份。确定继续？')) {
+      await cleanOldData(days);
+      alert('已清理 ' + days + ' 天前的旧记录。');
       renderManage();
     }
   });
