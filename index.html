@@ -1317,11 +1317,7 @@ function renderCheckForm(deviceId) {
   const now = getNowStr();
 
   let html = `
-    <div class="page check-page">
-      <div class="page-header">
-        <a href="#dashboard" class="back-btn">&larr; 返回</a>
-        <h1>设备点检</h1>
-      </div>
+    <div class="page check-page" style="max-width:500px;">
 
       <div class="check-device-info">
         <div class="device-name">${device.name}</div>
@@ -1480,8 +1476,7 @@ function renderCheckForm(deviceId) {
             ? `<span class="badge badge-danger">${Object.values(record.items).filter(i => i.status === 'abnormal').length} 项异常</span>`
             : '<span class="badge badge-success">全部正常</span>'}
         </div>
-        <a href="#dashboard" class="btn btn-primary" style="margin-top:20px;">返回首页</a>
-        <button class="btn btn-outline" style="margin-top:10px;" onclick="renderCheckForm(${deviceId})">再次点检（覆盖）</button>
+        <button class="btn btn-primary" style="margin-top:20px;" onclick="renderCheckForm(${deviceId})">再次点检</button>
       </div>
     `;
   });
@@ -2227,23 +2222,34 @@ function parseRoute() {
 function navigate() {
   const { page, params } = parseRoute();
 
+  // 如果在点检模式，锁定不允许通过 hash 跳转到其他页面
+  if (window._isCheckMode && page !== 'check') {
+    return;
+  }
+
   switch (page) {
     case 'dashboard':
+      window._isCheckMode = false;
       renderDashboard();
       break;
     case 'check':
+      window._isCheckMode = true;
       renderCheckForm(parseInt(params[0]));
       break;
     case 'history':
+      if (window._isCheckMode) return;
       renderHistory(parseInt(params[0]));
       break;
     case 'export':
+      if (window._isCheckMode) return;
       renderExport();
       break;
     case 'manage':
+      if (window._isCheckMode) return;
       renderManage();
       break;
     default:
+      if (window._isCheckMode) return;
       document.getElementById('app').innerHTML = `
         <div class="empty-state">
           <h2>404</h2>
@@ -2257,10 +2263,33 @@ function navigate() {
 /** 初始化 */
 function initApp() {
   // 监听 hash 变化
-  window.addEventListener('hashchange', navigate);
+  window.addEventListener('hashchange', function(e) {
+    // 如果在点检模式，阻止 hash 变化
+    if (window._isCheckMode) {
+      const { page } = parseRoute();
+      if (page !== 'check') {
+        // 恢复到 check 页面
+        window.location.replace(window.location.href);
+        return;
+      }
+    }
+    navigate();
+  });
+
+  // 拦截浏览器后退（popstate），在点检模式下阻止
+  window.addEventListener('popstate', function(e) {
+    if (window._isCheckMode) {
+      window.history.pushState(null, '', window.location.href);
+    }
+  });
 
   // 初始加载
   navigate();
+
+  // 初始进入点检页时，push 一个 state 防止直接后退
+  if (window._isCheckMode) {
+    window.history.pushState(null, '', window.location.href);
+  }
 }
 
 // 立即检查 DOM 是否已就绪，避免 DOMContentLoaded 在某些环境下不触发
