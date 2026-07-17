@@ -1069,6 +1069,69 @@ a:hover { text-decoration: underline; }
   font-size: 0.85rem;
 }
 
+  
+/* --- Identity input --- */
+.check-identity {
+  background: white;
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  padding: 14px;
+  margin-bottom: 12px;
+}
+.identity-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+.identity-row:last-child { margin-bottom: 0; }
+.identity-label {
+  font-weight: 600;
+  font-size: 0.85rem;
+  white-space: nowrap;
+  min-width: 70px;
+}
+.identity-input {
+  flex: 1;
+  padding: 8px 12px;
+  border: 1px solid var(--gray-300);
+  border-radius: var(--radius);
+  font-size: 0.9rem;
+  font-family: inherit;
+}
+.identity-input:focus {
+  outline: none;
+  border-color: var(--primary);
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1);
+}
+.shift-btns {
+  display: flex;
+  gap: 8px;
+}
+.btn-shift {
+  padding: 8px 18px;
+  border: 1px solid var(--gray-300);
+  border-radius: var(--radius);
+  font-size: 0.85rem;
+  cursor: pointer;
+  background: white;
+  transition: all 0.2s;
+}
+.btn-shift.active {
+  background: var(--primary);
+  color: white;
+  border-color: var(--primary);
+}
+.detail-tech, .detail-shift {
+  font-size: 0.75rem;
+  color: var(--gray-600);
+  margin-left: 8px;
+}
+.cell-tech, .cell-shift {
+  font-size: 0.75rem;
+  color: var(--gray-600);
+}
+
   </style>
 </head>
 <body>
@@ -1228,7 +1291,7 @@ async function getRecord(deviceId, dateStr) {
   try {
     var data = await supabaseQuery("check_records", "device_id=eq." + deviceId + "&check_date=eq." + dateStr + "&select=*");
     if (data && data.length > 0) {
-      return { timestamp: data[0].check_time, items: data[0].items || {}, record_id: data[0].id };
+      return { timestamp: data[0].check_time, technician: data[0].technician || '', shift: data[0].shift || '', items: data[0].items || {}, record_id: data[0].id };
     }
     return null;
   } catch (e) { console.error("getRecord:", e); return null; }
@@ -1241,6 +1304,8 @@ async function saveRecord(deviceId, dateStr, data) {
       device_id: deviceId,
       check_date: dateStr,
       check_time: data.timestamp,
+      technician: data.technician || '',
+      shift: data.shift || '白班',
       items: data.items
     }, "device_id,check_date");
     return true;
@@ -1438,6 +1503,20 @@ function renderCheckForm(deviceId) {
         <div class="check-time" id="liveTime">点检时间：${now}</div>
       </div>
 
+      <div class="check-identity">
+        <div class="identity-row">
+          <label class="identity-label">👤 点检人：</label>
+          <input type="text" class="identity-input" id="technicianName" placeholder="请输入姓名" maxlength="20">
+        </div>
+        <div class="identity-row">
+          <label class="identity-label">🕐 班次：</label>
+          <div class="shift-btns">
+            <button class="btn-shift active" data-shift="白班">☀️ 白班</button>
+            <button class="btn-shift" data-shift="夜班">🌙 夜班</button>
+          </div>
+        </div>
+      </div>
+
       <div class="check-form" id="checkForm">
         <div class="check-section-title">点检项目</div>
   `;
@@ -1496,6 +1575,14 @@ function renderCheckForm(deviceId) {
   });
   // 暴露给全局以支持照片删除回调
   window._itemStates = itemStates;
+
+  // 绑定班次按钮
+  document.querySelectorAll('.btn-shift').forEach(function(btn) {
+    btn.addEventListener('click', function() {
+      document.querySelectorAll('.btn-shift').forEach(function(b) { b.classList.remove('active'); });
+      this.classList.add('active');
+    });
+  });
 
   // 绑定正常/异常按钮
   document.querySelectorAll('.btn-status').forEach(btn => {
@@ -1564,9 +1651,14 @@ function renderCheckForm(deviceId) {
     }
 
     const today = getTodayStr();
+    const techName = document.getElementById('technicianName').value.trim();
+    if (!techName) { alert('请输入点检人姓名！'); return; }
+    const shiftBtn = document.querySelector('.btn-shift.active');
+    const shift = shiftBtn ? shiftBtn.dataset.shift : '白班';
     const record = {
       timestamp: getNowStr(),
-      technician: '',
+      technician: techName,
+      shift: shift,
       items: {}
     };
 
@@ -1687,7 +1779,7 @@ async function renderDashboard() {
       Object.values(items).forEach(function(it) {
         if (it.photos && Array.isArray(it.photos)) totalPhotos += it.photos.length;
       });
-      detailHtml = `<div class="card-time">点检时间：${record.timestamp}</div>`;
+      detailHtml = `<div class="card-time">${record.technician ? record.technician + ' · ' : ''}${record.shift || ''}</div><div class="card-time">${record.timestamp}</div>`;
       if (totalPhotos > 0) {
         detailHtml += `<div class="card-photos">📷 ${totalPhotos}张照片</div>`;
       }
@@ -1805,6 +1897,8 @@ async function renderDashboard() {
             <div class="detail-device-header">
               <span class="detail-dot" style="background:${getDeviceColor(device.id)}"></span>
               <strong>${device.name}</strong>
+              ${record.technician ? '<span class="detail-tech">👤 ' + record.technician + '</span>' : ''}
+              ${record.shift ? '<span class="detail-shift">' + (record.shift === '夜班' ? '🌙' : '☀️') + ' ' + record.shift + '</span>' : ''}
               <span class="badge ${abnormalCount > 0 ? 'badge-danger' : 'badge-success'}">${abnormalCount > 0 ? abnormalCount + '项异常' : '正常'}</span>
               <span class="detail-time">${record.timestamp}</span>
             </div>
@@ -1885,7 +1979,7 @@ async function renderHistory(deviceId) {
         <div class="history-card">
           <div class="history-header">
             <span class="history-date">📅 ${dateStr}</span>
-            <span class="history-time">${record.timestamp}</span>
+            <span class="history-time">${record.technician ? '👤 ' + record.technician + ' · ' : ''}${record.shift || ''} · ${record.timestamp}</span>
             <span class="badge ${abnormalCount > 0 ? 'badge-danger' : 'badge-success'}">${abnormalCount > 0 ? abnormalCount + '项异常' : '正常'}</span>
           </div>
           <div class="history-items">
@@ -1984,6 +2078,8 @@ async function generateReport(year, month) {
           <tr>
             <th>日期</th>
             ${DEVICES.map(d => `<th>${d.name.length > 10 ? d.name.substring(0, 10) + '...' : d.name}</th>`).join('')}
+            <th>点检人</th>
+            <th>班次</th>
             <th>汇总</th>
           </tr>
         </thead>
@@ -2001,12 +2097,16 @@ async function generateReport(year, month) {
       </td>`;
 
     let daySummary = { checked: 0, abnormal: 0 };
+    let dayTech = '';
+    let dayShift = '';
 
     DEVICES.forEach(device => {
       const record = (allRecords[dateStr] && allRecords[dateStr][device.id]) || null;
 
       if (record) {
         daySummary.checked++;
+        if (record.technician) dayTech = record.technician;
+        if (record.shift) dayShift = record.shift;
         const items = record.items || {};
         const hasAbnormal = Object.values(items).some(i => i.status === 'abnormal');
         if (hasAbnormal) {
@@ -2023,7 +2123,7 @@ async function generateReport(year, month) {
     const summaryText = daySummary.checked === 0 ? '未点检'
       : daySummary.checked === 4 && daySummary.abnormal === 0 ? '全部正常'
       : `${daySummary.checked}/4已检 ${daySummary.abnormal > 0 ? daySummary.abnormal + '项异常' : ''}`;
-    html += `<td class="cell-summary">${summaryText}</td>`;
+    html += `<td class="cell-tech">${dayTech}</td><td class="cell-shift">${dayShift}</td><td class="cell-summary">${summaryText}</td>`;
 
     html += '</tr>';
   }
@@ -2174,6 +2274,69 @@ async function generateReport(year, month) {
   font-size: 0.85rem;
 }
 
+  
+/* --- Identity input --- */
+.check-identity {
+  background: white;
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  padding: 14px;
+  margin-bottom: 12px;
+}
+.identity-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+.identity-row:last-child { margin-bottom: 0; }
+.identity-label {
+  font-weight: 600;
+  font-size: 0.85rem;
+  white-space: nowrap;
+  min-width: 70px;
+}
+.identity-input {
+  flex: 1;
+  padding: 8px 12px;
+  border: 1px solid var(--gray-300);
+  border-radius: var(--radius);
+  font-size: 0.9rem;
+  font-family: inherit;
+}
+.identity-input:focus {
+  outline: none;
+  border-color: var(--primary);
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1);
+}
+.shift-btns {
+  display: flex;
+  gap: 8px;
+}
+.btn-shift {
+  padding: 8px 18px;
+  border: 1px solid var(--gray-300);
+  border-radius: var(--radius);
+  font-size: 0.85rem;
+  cursor: pointer;
+  background: white;
+  transition: all 0.2s;
+}
+.btn-shift.active {
+  background: var(--primary);
+  color: white;
+  border-color: var(--primary);
+}
+.detail-tech, .detail-shift {
+  font-size: 0.75rem;
+  color: var(--gray-600);
+  margin-left: 8px;
+}
+.cell-tech, .cell-shift {
+  font-size: 0.75rem;
+  color: var(--gray-600);
+}
+
   </style></head>
         <body>${reportHtml}</body>
       </html>
@@ -2192,17 +2355,20 @@ async function exportCSV(year, month) {
   let csv = '\uFEFF';
   csv += '日期,';
   DEVICES.forEach(d => { csv += `"${d.name}",`; });
-  csv += '汇总\n';
+  csv += '点检人,班次,汇总\n';
 
   for (let d = 1; d <= daysInMonth; d++) {
     const dateStr = `${year}-${String(month).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
     csv += `${dateStr},`;
     let checked = 0, abnormal = 0;
+    let csvTech = '', csvShift = '';
 
     DEVICES.forEach(device => {
       const record = (allRecords[dateStr] && allRecords[dateStr][device.id]) || null;
       if (record) {
         checked++;
+        if (record.technician) csvTech = record.technician;
+        if (record.shift) csvShift = record.shift;
         const items = record.items || {};
         if (Object.values(items).some(i => i.status === 'abnormal')) {
           abnormal++;
@@ -2215,6 +2381,7 @@ async function exportCSV(year, month) {
       }
     });
 
+    csv += `${csvTech},${csvShift},`;
     csv += checked === 0 ? '未点检' : `${checked}/4已检`;
     csv += '\n';
   }
