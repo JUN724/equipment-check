@@ -991,6 +991,52 @@ a:hover { text-decoration: underline; }
   .data-actions .btn { width: 100%; }
 }
 
+  
+/* --- Photo thumbnails in dashboard --- */
+.card-photos {
+  font-size: 0.75rem;
+  color: #6b7280;
+  margin-bottom: 4px;
+}
+
+.detail-photo-imgs {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+  margin-top: 4px;
+}
+
+.detail-thumb {
+  width: 50px;
+  height: 50px;
+  object-fit: cover;
+  border-radius: 4px;
+  border: 1px solid #e5e7eb;
+  cursor: pointer;
+}
+
+.history-photos {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+  margin-top: 4px;
+  margin-left: 20px;
+}
+
+.history-thumb {
+  width: 60px;
+  height: 60px;
+  object-fit: cover;
+  border-radius: 4px;
+  border: 1px solid #e5e7eb;
+  cursor: pointer;
+}
+
+.detail-thumb:hover, .history-thumb:hover {
+  transform: scale(1.1);
+  transition: transform 0.2s;
+}
+
   </style>
 </head>
 <body>
@@ -1375,8 +1421,8 @@ function renderCheckForm(deviceId) {
             <button class="btn-status btn-abnormal" data-idx="${index}" data-status="abnormal">✗ 异常</button>
           </div>
         </div>
-        <div class="check-item-detail" id="detail_${index}" style="display:none;">
-          <textarea class="note-input" id="note_${index}" placeholder="异常说明（必填）..." rows="2"></textarea>
+        <div class="check-item-detail" id="detail_${index}">
+          <textarea class="note-input" id="note_${index}" placeholder="备注说明（异常时必填）..." rows="2"></textarea>
           <div class="photo-area" id="photos_${index}">
             <button class="btn-photo" data-idx="${index}">📷 拍照记录</button>
             <span class="photo-count" id="photoCount_${index}">最多3张</span>
@@ -1435,12 +1481,8 @@ function renderCheckForm(deviceId) {
 
       // 显示/隐藏详情区域
       const detail = document.getElementById('detail_' + idx);
-      if (status === 'abnormal') {
-        detail.style.display = 'block';
-      } else {
-        detail.style.display = 'none';
+      if (status === 'normal') {
         itemStates[idx].note = '';
-        itemStates[idx].photos = [];
       }
     });
   });
@@ -1608,7 +1650,15 @@ async function renderDashboard() {
         statusClass = 'normal';
         statusText = '全部正常';
       }
+      // 统计照片总数
+      let totalPhotos = 0;
+      Object.values(items).forEach(function(it) {
+        if (it.photos && Array.isArray(it.photos)) totalPhotos += it.photos.length;
+      });
       detailHtml = `<div class="card-time">点检时间：${record.timestamp}</div>`;
+      if (totalPhotos > 0) {
+        detailHtml += `<div class="card-photos">📷 ${totalPhotos}张照片</div>`;
+      }
     }
 
     html += `
@@ -1734,7 +1784,7 @@ async function renderDashboard() {
               <span>${item.status === 'normal' ? '✓' : '✗'}</span>
               <span>${check}</span>
               ${item.note ? `<span class="detail-note">${item.note}</span>` : ''}
-              ${item.photos && item.photos.length > 0 ? `<span class="detail-photos">📷${item.photos.length}张</span>` : ''}
+              ${item.photos && item.photos.length > 0 ? `<span class="detail-photos">📷${item.photos.length}张</span><div class="detail-photo-imgs">${item.photos.map(function(p){ return '<img src="'+p+'" class="detail-thumb" onclick="window.open(this.src)">'; }).join('')}</div>` : ''}
             </div>
           `;
         });
@@ -1816,6 +1866,7 @@ async function renderHistory(deviceId) {
             <span class="item-status">${item.status === 'normal' ? '✓' : '✗'}</span>
             <span class="item-text">${check}</span>
             ${item.note ? `<span class="item-note">备注：${item.note}</span>` : ''}
+            ${item.photos && item.photos.length > 0 ? `<div class="history-photos">${item.photos.map(function(p){ return '<img src="'+p+'" class="history-thumb" onclick="window.open(this.src)">'; }).join('')}</div>` : ''}
           </div>
         `;
       });
@@ -2013,7 +2064,53 @@ async function generateReport(year, month) {
           .summary-bar { height: 8px; background: #e5e7eb; border-radius: 4px; margin-top: 6px; }
           .bar-fill { height: 100%; border-radius: 4px; }
           @media print { body { padding: 0; } }
-        </style></head>
+        
+/* --- Photo thumbnails in dashboard --- */
+.card-photos {
+  font-size: 0.75rem;
+  color: #6b7280;
+  margin-bottom: 4px;
+}
+
+.detail-photo-imgs {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+  margin-top: 4px;
+}
+
+.detail-thumb {
+  width: 50px;
+  height: 50px;
+  object-fit: cover;
+  border-radius: 4px;
+  border: 1px solid #e5e7eb;
+  cursor: pointer;
+}
+
+.history-photos {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+  margin-top: 4px;
+  margin-left: 20px;
+}
+
+.history-thumb {
+  width: 60px;
+  height: 60px;
+  object-fit: cover;
+  border-radius: 4px;
+  border: 1px solid #e5e7eb;
+  cursor: pointer;
+}
+
+.detail-thumb:hover, .history-thumb:hover {
+  transform: scale(1.1);
+  transition: transform 0.2s;
+}
+
+  </style></head>
         <body>${reportHtml}</body>
       </html>
     `);
