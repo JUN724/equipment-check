@@ -1001,96 +1001,6 @@ a:hover { text-decoration: underline; }
   </div>
 
   <script>
-
-// ===== Supabase 后端配置 =====
-const SUPABASE_URL = "https://mrbrkxfsjdfrwxksvvsi.supabase.co";
-const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1yYnJreGZzamRmcnd4a3N2dnNpIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODQyNjIzNzQsImV4cCI6MjA5OTgzODM3NH0.rh4AwOCxFz7jcnqoCEDn5hl1XQXOLOLVF8ADbx2yEPs";
-
-// 简单的 fetch 封装（避免引入 Supabase SDK 增加体积）
-async function supabaseQuery(table, query) {
-  let url = `${SUPABASE_URL}/rest/v1/${table}?${query}`;
-  const resp = await fetch(url, {
-    headers: {
-      "apikey": SUPABASE_ANON_KEY,
-      "Authorization": `Bearer ${SUPABASE_ANON_KEY}`,
-      "Content-Type": "application/json"
-    }
-  });
-  if (!resp.ok) {
-    const err = await resp.text();
-    throw new Error(`Supabase error: ${resp.status} ${err}`);
-  }
-  return resp.json();
-}
-
-async function supabaseInsert(table, data) {
-  const resp = await fetch(`${SUPABASE_URL}/rest/v1/${table}`, {
-    method: "POST",
-    headers: {
-      "apikey": SUPABASE_ANON_KEY,
-      "Authorization": `Bearer ${SUPABASE_ANON_KEY}`,
-      "Content-Type": "application/json",
-      "Prefer": "return=representation"
-    },
-    body: JSON.stringify(data)
-  });
-  if (!resp.ok) {
-    const err = await resp.text();
-    throw new Error(`Supabase insert error: ${resp.status} ${err}`);
-  }
-  return resp.json();
-}
-
-async function supabaseUpsert(table, data, onConflict) {
-  // 先尝试 POST（新记录），如果冲突则 PATCH
-  let resp = await fetch(`${SUPABASE_URL}/rest/v1/${table}`, {
-    method: "POST",
-    headers: {
-      "apikey": SUPABASE_ANON_KEY,
-      "Authorization": `Bearer ${SUPABASE_ANON_KEY}`,
-      "Content-Type": "application/json",
-      "Prefer": "return=representation"
-    },
-    body: JSON.stringify(data)
-  });
-
-  // 409 = 唯一约束冲突，改用 PATCH 更新
-  if (resp.status === 409) {
-    const conflictCols = onConflict.split(",");
-    let filter = conflictCols.map(c => `${c}=eq.${encodeURIComponent(data[c])}`).join("&");
-    resp = await fetch(`${SUPABASE_URL}/rest/v1/${table}?${filter}`, {
-      method: "PATCH",
-      headers: {
-        "apikey": SUPABASE_ANON_KEY,
-        "Authorization": `Bearer ${SUPABASE_ANON_KEY}`,
-        "Content-Type": "application/json",
-        "Prefer": "return=representation"
-      },
-      body: JSON.stringify(data)
-    });
-  }
-
-  if (!resp.ok) {
-    const err = await resp.text();
-    throw new Error(`Supabase upsert error: ${resp.status} ${err}`);
-  }
-  return resp.json();
-}
-
-async function supabaseDelete(table, query) {
-  const resp = await fetch(`${SUPABASE_URL}/rest/v1/${table}?${query}`, {
-    method: "DELETE",
-    headers: {
-      "apikey": SUPABASE_ANON_KEY,
-      "Authorization": `Bearer ${SUPABASE_ANON_KEY}`
-    }
-  });
-  if (!resp.ok) {
-    const err = await resp.text();
-    throw new Error(`Supabase delete error: ${resp.status} ${err}`);
-  }
-  return resp.json();
-}
 /**
  * 设备配置数据
  * 修改此文件即可更新设备信息和点检项目
@@ -1160,73 +1070,59 @@ function getDeviceColor(id) {
  * }
  */
 
-// STORAGE_KEY 已废弃，使用 Supabase 后端存储
+const STORAGE_KEY = 'equipment_check_records';
 const MAX_PHOTOS_PER_ITEM = 3;
 const PHOTO_MAX_WIDTH = 800;
 const PHOTO_QUALITY = 0.5;
 
 /** 获取全部数据 */
-// getAllRecords 已废弃，改用 Supabase API，保留空函数兼容
 function getAllRecords() {
-  return {};
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    return raw ? JSON.parse(raw) : {};
+  } catch (e) {
+    console.error('读取存储失败:', e);
+    return {};
+  }
 }
 
 /** 保存全部数据 */
-// saveAllRecords 已废弃，数据直接写入 Supabase
-function saveAllRecords(records) {}
+function saveAllRecords(records) {
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(records));
+  } catch (e) {
+    console.error('保存数据失败，可能存储空间不足:', e);
+    alert('保存失败！存储空间不足，请清理旧数据或导出备份。');
+  }
+}
 
 /** 获取某设备某天的记录 */
-async function getRecord(deviceId, dateStr) {
-  try {
-    const data = await supabaseQuery("check_records", `device_id=eq.${deviceId}&check_date=eq.${dateStr}&select=*`);
-    if (data && data.length > 0) {
-      const r = data[0];
-      return {
-        timestamp: r.check_time,
-        items: r.items || {},
-        record_id: r.id
-      };
-    }
-    return null;
-  } catch (e) {
-    console.error("读取点检记录失败:", e);
-    return null;
-  }
+function getRecord(deviceId, dateStr) {
+  const records = getAllRecords();
+  const key = `device_${deviceId}`;
+  return (records[key] && records[key][dateStr]) || null;
 }
 
 /** 保存某设备某天的记录 */
-async function saveRecord(deviceId, dateStr, data) {
-  try {
-    await supabaseUpsert("check_records", {
-      device_id: deviceId,
-      check_date: dateStr,
-      check_time: data.timestamp,
-      items: data.items
-    }, "device_id,check_date");
-    return true;
-  } catch (e) {
-    console.error("保存点检记录失败:", e);
-    alert("保存失败！请检查网络连接后重试。");
-    return false;
-  }
+function saveRecord(deviceId, dateStr, data) {
+  const records = getAllRecords();
+  const key = `device_${deviceId}`;
+  if (!records[key]) records[key] = {};
+  records[key][dateStr] = data;
+  saveAllRecords(records);
 }
 
 /** 获取某设备所有记录日期 */
-async function getDeviceDates(deviceId) {
-  try {
-    const data = await supabaseQuery("check_records", `device_id=eq.${deviceId}&select=check_date&order=check_date.desc`);
-    return (data || []).map(r => r.check_date);
-  } catch (e) {
-    console.error("读取设备日期失败:", e);
-    return [];
-  }
+function getDeviceDates(deviceId) {
+  const records = getAllRecords();
+  const key = `device_${deviceId}`;
+  return records[key] ? Object.keys(records[key]).sort() : [];
 }
 
 /** 检查某设备今天是否已点检 */
-async function isCheckedToday(deviceId) {
+function isCheckedToday(deviceId) {
   const today = getTodayStr();
-  const record = await getRecord(deviceId, today);
-  return record !== null;
+  return getRecord(deviceId, today) !== null;
 }
 
 /** 获取今天日期字符串 */
@@ -1281,119 +1177,92 @@ function capturePhoto() {
 }
 
 /** 计算某月各设备点检统计 */
-async function getMonthStats(year, month) {
-  const monthStr = String(month).padStart(2, '0');
-  const startDate = `${year}-${monthStr}-01`;
-  const endDate = `${year}-${monthStr}-31`;
+function getMonthStats(year, month) {
+  const records = getAllRecords();
   const daysInMonth = new Date(year, month, 0).getDate();
   const stats = {};
 
   DEVICES.forEach(device => {
-    stats[device.id] = { checked: 0, abnormal: 0, total: daysInMonth };
-  });
+    const key = `device_${device.id}`;
+    const deviceRecords = records[key] || {};
+    let checked = 0, abnormal = 0;
 
-  try {
-    const data = await supabaseQuery("check_records", `check_date=gte.${startDate}&check_date=lte.${endDate}&select=device_id,items`);
-    (data || []).forEach(record => {
-      if (stats[record.device_id]) {
-        stats[record.device_id].checked++;
-        const items = record.items || {};
-        if (Object.values(items).some(i => i.status === 'abnormal')) {
-          stats[record.device_id].abnormal++;
+    for (let d = 1; d <= daysInMonth; d++) {
+      const dateStr = `${year}-${String(month).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+      if (deviceRecords[dateStr]) {
+        checked++;
+        // 检查是否有异常项
+        const items = deviceRecords[dateStr].items;
+        if (items) {
+          for (const key of Object.keys(items)) {
+            if (items[key].status === 'abnormal') {
+              abnormal++;
+              break;
+            }
+          }
         }
       }
-    });
-  } catch (e) {
-    console.error("获取月度统计失败:", e);
-  }
+    }
+
+    stats[device.id] = { checked, abnormal, total: daysInMonth };
+  });
 
   return stats;
 }
 
 /** 获取某月每天各设备的点检状态（用于日历） */
-async function getMonthDailyStatus(year, month) {
-  const monthStr = String(month).padStart(2, '0');
-  const startDate = `${year}-${monthStr}-01`;
-  const endDate = `${year}-${monthStr}-31`;
+function getMonthDailyStatus(year, month) {
+  const records = getAllRecords();
+  const daysInMonth = new Date(year, month, 0).getDate();
   const daily = {};
 
-  try {
-    const data = await supabaseQuery("check_records", `check_date=gte.${startDate}&check_date=lte.${endDate}&select=device_id,check_date,items`);
-    const daysInMonth = new Date(year, month, 0).getDate();
-
-    // 批量获取本月所有记录
-  let allRecords = {};
-  try {
-    const monthStr = String(month).padStart(2, '0');
-    const data = await supabaseQuery("check_records", `check_date=gte.${year}-${monthStr}-01&check_date=lte.${year}-${monthStr}-31&select=*`);
-    (data || []).forEach(r => {
-      if (!allRecords[r.check_date]) allRecords[r.check_date] = {};
-      allRecords[r.check_date][r.device_id] = r;
-    });
-  } catch (e) { console.error(e); }
-
   for (let d = 1; d <= daysInMonth; d++) {
-      const dateStr = `${year}-${monthStr}-${String(d).padStart(2, '0')}`;
-      daily[dateStr] = {};
-      DEVICES.forEach(async device => { daily[dateStr][device.id] = 'unchecked'; });
-    }
+    const dateStr = `${year}-${String(month).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+    daily[dateStr] = {};
 
-    (data || []).forEach(record => {
-      if (daily[record.check_date]) {
-        const items = record.items || {};
+    DEVICES.forEach(device => {
+      const key = `device_${device.id}`;
+      const record = (records[key] && records[key][dateStr]) || null;
+      if (record) {
         let hasAbnormal = false;
+        const items = record.items || {};
         for (const k of Object.keys(items)) {
           if (items[k].status === 'abnormal') { hasAbnormal = true; break; }
         }
-        daily[record.check_date][record.device_id] = hasAbnormal ? 'abnormal' : 'normal';
+        daily[dateStr][device.id] = hasAbnormal ? 'abnormal' : 'normal';
+      } else {
+        daily[dateStr][device.id] = 'unchecked';
       }
     });
-  } catch (e) {
-    console.error("获取月度状态失败:", e);
   }
 
   return daily;
 }
 
 /** 导出全部数据为 JSON 文件 */
-async function exportAllData() {
-  try {
-    const data = await supabaseQuery("check_records", "select=*&order=check_date.desc");
-    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `点检数据备份_${getTodayStr()}.json`;
-    a.click();
-    URL.revokeObjectURL(url);
-  } catch (e) {
-    alert("导出失败: " + e.message);
-  }
+function exportAllData() {
+  const records = getAllRecords();
+  const blob = new Blob([JSON.stringify(records, null, 2)], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `点检数据备份_${getTodayStr()}.json`;
+  a.click();
+  URL.revokeObjectURL(url);
 }
 
 /** 导入 JSON 备份 */
-async function importData(file) {
+function importData(file) {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
-    reader.onload = async (e) => {
+    reader.onload = (e) => {
       try {
         const data = JSON.parse(e.target.result);
-        if (!Array.isArray(data)) throw new Error('格式错误：需要数组格式的备份文件');
-        let count = 0;
-        for (const record of data) {
-          try {
-            await supabaseUpsert("check_records", {
-              device_id: record.device_id,
-              check_date: record.check_date,
-              check_time: record.check_time || record.timestamp,
-              items: record.items
-            }, "device_id,check_date");
-            count++;
-          } catch (err) { console.warn("导入单条失败:", err); }
-        }
-        resolve({ count });
+        if (typeof data !== 'object') throw new Error('格式错误');
+        saveAllRecords(data);
+        resolve(data);
       } catch (err) {
-        reject('文件格式不正确: ' + err.message);
+        reject('文件格式不正确');
       }
     };
     reader.onerror = () => reject('读取文件失败');
@@ -1402,31 +1271,34 @@ async function importData(file) {
 }
 
 /** 清理超过 N 天的数据 */
-async function cleanOldData(days = 90) {
-  try {
-    const cutoff = new Date();
-    cutoff.setDate(cutoff.getDate() - days);
-    const cutoffStr = `${cutoff.getFullYear()}-${String(cutoff.getMonth() + 1).padStart(2, '0')}-${String(cutoff.getDate()).padStart(2, '0')}`;
-    await supabaseDelete("check_records", `check_date=lt.${cutoffStr}`);
-    await supabaseDelete("photos", `created_at=lt.${cutoff.toISOString()}`);
-    return 0; // Supabase 不返回删除条数
-  } catch (e) {
-    console.error("清理数据失败:", e);
-    return 0;
+function cleanOldData(days = 90) {
+  const records = getAllRecords();
+  const cutoff = new Date();
+  cutoff.setDate(cutoff.getDate() - days);
+  const cutoffStr = `${cutoff.getFullYear()}-${String(cutoff.getMonth() + 1).padStart(2, '0')}-${String(cutoff.getDate()).padStart(2, '0')}`;
+
+  let cleaned = 0;
+  for (const devKey of Object.keys(records)) {
+    for (const dateStr of Object.keys(records[devKey])) {
+      if (dateStr < cutoffStr) {
+        delete records[devKey][dateStr];
+        cleaned++;
+      }
+    }
+    if (Object.keys(records[devKey]).length === 0) {
+      delete records[devKey];
+    }
   }
+
+  saveAllRecords(records);
+  return cleaned;
 }
 
 /** 清除所有数据 */
-async function clearAllData() {
+function clearAllData() {
   if (confirm('确定要清除所有点检数据吗？此操作不可恢复！\n建议先导出备份。')) {
-    try {
-      await supabaseDelete("photos", "id=gt.0");
-      await supabaseDelete("check_records", "id=gt.0");
-      return true;
-    } catch (e) {
-      alert("清除失败: " + e.message);
-      return false;
-    }
+    localStorage.removeItem(STORAGE_KEY);
+    return true;
   }
   return false;
 }
@@ -1573,7 +1445,7 @@ function renderCheckForm(deviceId) {
   });
 
   // 提交按钮
-  document.getElementById('btnSubmit').addEventListener('click', async () => {
+  document.getElementById('btnSubmit').addEventListener('click', () => {
     // 验证异常项是否填写了说明
     for (const idx of Object.keys(itemStates)) {
       if (itemStates[idx].status === 'abnormal' && !itemStates[idx].note.trim()) {
@@ -1597,8 +1469,7 @@ function renderCheckForm(deviceId) {
       };
     }
 
-    const saved = await saveRecord(deviceId, today, record);
-    if (!saved) return;
+    saveRecord(deviceId, today, record);
 
     // 显示成功
     const formEl = document.getElementById('checkForm');
@@ -1658,7 +1529,7 @@ function renderPhotoPreviews(idx, photos) {
  * 仪表盘页面
  * 路由: #dashboard (默认)
  */
-async function renderDashboard() {
+function renderDashboard() {
   const today = getTodayStr();
   const now = new Date();
   const year = now.getFullYear();
@@ -1685,7 +1556,7 @@ async function renderDashboard() {
 
   // 四台设备卡片
   DEVICES.forEach(device => {
-    const record = await getRecord(device.id, today);
+    const record = getRecord(device.id, today);
     const checked = !!record;
     let statusClass = 'unchecked';
     let statusText = '未点检';
@@ -1771,18 +1642,7 @@ async function renderDashboard() {
 
     // 日期格子
     const todayStr = getTodayStr();
-    // 批量获取本月所有记录
-  let allRecords = {};
-  try {
-    const monthStr = String(month).padStart(2, '0');
-    const data = await supabaseQuery("check_records", `check_date=gte.${year}-${monthStr}-01&check_date=lte.${year}-${monthStr}-31&select=*`);
-    (data || []).forEach(r => {
-      if (!allRecords[r.check_date]) allRecords[r.check_date] = {};
-      allRecords[r.check_date][r.device_id] = r;
-    });
-  } catch (e) { console.error(e); }
-
-  for (let d = 1; d <= daysInMonth; d++) {
+    for (let d = 1; d <= daysInMonth; d++) {
       const dateStr = `${currentYear}-${String(currentMonth).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
       const isToday = dateStr === todayStr;
       const status = dailyStatus[dateStr] || {};
@@ -1791,7 +1651,7 @@ async function renderDashboard() {
       calHtml += `<span class="cal-day ${isToday ? 'today-badge' : ''}">${d}</span>`;
       calHtml += '<div class="cal-dots">';
 
-      DEVICES.forEach(async device => {
+      DEVICES.forEach(device => {
         const s = status[device.id] || 'unchecked';
         calHtml += `<span class="cal-dot ${s}" style="background:${s === 'unchecked' ? '#e5e7eb' : getDeviceColor(device.id)}" title="${device.name}: ${s === 'normal' ? '正常' : s === 'abnormal' ? '异常' : '未点检'}"></span>`;
       });
@@ -1811,13 +1671,13 @@ async function renderDashboard() {
     });
   }
 
-  async function showDateDetail(dateStr) {
+  function showDateDetail(dateStr) {
     const detailEl = document.getElementById('calendarDetail');
     let detailHtml = `<h3>${dateStr} 点检详情</h3>`;
 
     let hasAny = false;
-    for (const device of DEVICES) {
-      const record = await getRecord(device.id, dateStr);
+    DEVICES.forEach(device => {
+      const record = getRecord(device.id, dateStr);
       if (record) {
         hasAny = true;
         const items = record.items || {};
@@ -1844,7 +1704,7 @@ async function renderDashboard() {
         });
         detailHtml += '</div>';
       }
-    }
+    });
 
     if (!hasAny) {
       detailHtml += '<p class="empty-text">当天无点检记录</p>';
@@ -1877,14 +1737,14 @@ async function renderDashboard() {
 }
 
 /** 设备历史记录页 */
-async function renderHistory(deviceId) {
+function renderHistory(deviceId) {
   const device = getDeviceById(deviceId);
   if (!device) {
     document.getElementById('app').innerHTML = '<div class="empty-state"><p>设备不存在</p></div>';
     return;
   }
 
-  const dates = (await getDeviceDates(deviceId)).reverse(); // 最新在前
+  const dates = getDeviceDates(deviceId).reverse(); // 最新在前
 
   let html = `
     <div class="page history-page">
@@ -1899,7 +1759,7 @@ async function renderHistory(deviceId) {
   } else {
     html += '<div class="history-list">';
     dates.forEach(dateStr => {
-      const record = await getRecord(deviceId, dateStr);
+      const record = getRecord(deviceId, dateStr);
       const items = record.items || {};
       const abnormalCount = Object.values(items).filter(i => i.status === 'abnormal').length;
 
@@ -1981,15 +1841,15 @@ function renderExport() {
 
   document.getElementById('app').innerHTML = html;
 
-  document.getElementById('btnGenerate').addEventListener('click', async () => {
+  document.getElementById('btnGenerate').addEventListener('click', () => {
     const y = parseInt(document.getElementById('exportYear').value);
     const m = parseInt(document.getElementById('exportMonth').value);
-    await generateReport(y, m);
+    generateReport(y, m);
   });
 }
 
-async function generateReport(year, month) {
-  // 从 Supabase 获取数据
+function generateReport(year, month) {
+  const records = getAllRecords();
   const daysInMonth = new Date(year, month, 0).getDate();
 
   let html = `
@@ -2011,17 +1871,6 @@ async function generateReport(year, month) {
         <tbody>
   `;
 
-  // 批量获取本月所有记录
-  let allRecords = {};
-  try {
-    const monthStr = String(month).padStart(2, '0');
-    const data = await supabaseQuery("check_records", `check_date=gte.${year}-${monthStr}-01&check_date=lte.${year}-${monthStr}-31&select=*`);
-    (data || []).forEach(r => {
-      if (!allRecords[r.check_date]) allRecords[r.check_date] = {};
-      allRecords[r.check_date][r.device_id] = r;
-    });
-  } catch (e) { console.error(e); }
-
   for (let d = 1; d <= daysInMonth; d++) {
     const dateStr = `${year}-${String(month).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
     const dayOfWeek = ['日', '一', '二', '三', '四', '五', '六'][new Date(year, month - 1, d).getDay()];
@@ -2034,9 +1883,9 @@ async function generateReport(year, month) {
 
     let daySummary = { checked: 0, abnormal: 0 };
 
-    DEVICES.forEach(async device => {
+    DEVICES.forEach(device => {
       const key = `device_${device.id}`;
-      const record = (allRecords[dateStr] && allRecords[dateStr][device.id]) || null;
+      const record = (records[key] && records[key][dateStr]) || null;
 
       if (record) {
         daySummary.checked++;
@@ -2074,18 +1923,7 @@ async function generateReport(year, month) {
     const key = `device_${device.id}`;
     const deviceRecords = records[key] || {};
     let checked = 0, abnormal = 0;
-    // 批量获取本月所有记录
-  let allRecords = {};
-  try {
-    const monthStr = String(month).padStart(2, '0');
-    const data = await supabaseQuery("check_records", `check_date=gte.${year}-${monthStr}-01&check_date=lte.${year}-${monthStr}-31&select=*`);
-    (data || []).forEach(r => {
-      if (!allRecords[r.check_date]) allRecords[r.check_date] = {};
-      allRecords[r.check_date][r.device_id] = r;
-    });
-  } catch (e) { console.error(e); }
-
-  for (let d = 1; d <= daysInMonth; d++) {
+    for (let d = 1; d <= daysInMonth; d++) {
       const dateStr = `${year}-${String(month).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
       if (deviceRecords[dateStr]) {
         checked++;
@@ -2152,8 +1990,8 @@ async function generateReport(year, month) {
   };
 }
 
-async function exportCSV(year, month) {
-  // 从 Supabase 获取数据
+function exportCSV(year, month) {
+  const records = getAllRecords();
   const daysInMonth = new Date(year, month, 0).getDate();
 
   // BOM for Excel Chinese support
@@ -2162,25 +2000,14 @@ async function exportCSV(year, month) {
   DEVICES.forEach(d => { csv += `"${d.name}",`; });
   csv += '汇总\n';
 
-  // 批量获取本月所有记录
-  let allRecords = {};
-  try {
-    const monthStr = String(month).padStart(2, '0');
-    const data = await supabaseQuery("check_records", `check_date=gte.${year}-${monthStr}-01&check_date=lte.${year}-${monthStr}-31&select=*`);
-    (data || []).forEach(r => {
-      if (!allRecords[r.check_date]) allRecords[r.check_date] = {};
-      allRecords[r.check_date][r.device_id] = r;
-    });
-  } catch (e) { console.error(e); }
-
   for (let d = 1; d <= daysInMonth; d++) {
     const dateStr = `${year}-${String(month).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
     csv += `${dateStr},`;
     let checked = 0, abnormal = 0;
 
-    DEVICES.forEach(async device => {
+    DEVICES.forEach(device => {
       const key = `device_${device.id}`;
-      const record = (allRecords[dateStr] && allRecords[dateStr][device.id]) || null;
+      const record = (records[key] && records[key][dateStr]) || null;
       if (record) {
         checked++;
         const items = record.items || {};
@@ -2209,8 +2036,8 @@ async function exportCSV(year, month) {
 }
 
 /** 管理页 */
-async function renderManage() {
-  // 从 Supabase 获取数据
+function renderManage() {
+  const records = getAllRecords();
   let totalRecords = 0;
   for (const devKey of Object.keys(records)) {
     totalRecords += Object.keys(records[devKey]).length;
@@ -2294,8 +2121,8 @@ async function renderManage() {
   document.getElementById('importFileInput').addEventListener('change', async (e) => {
     if (e.target.files[0]) {
       try {
-        const result = await importData(e.target.files[0]);
-        alert(`数据导入成功！共导入 ${result.count} 条记录。`);
+        await importData(e.target.files[0]);
+        alert('数据导入成功！页面将刷新。');
         renderManage();
       } catch (err) {
         alert('导入失败：' + err);
@@ -2303,16 +2130,16 @@ async function renderManage() {
     }
   });
 
-  document.getElementById('btnCleanOld').addEventListener('click', async () => {
+  document.getElementById('btnCleanOld').addEventListener('click', () => {
     if (confirm('将清理90天之前的点检数据，建议先导出备份。确定继续？')) {
-      await cleanOldData(90);
-      alert("已清理90天前的旧记录。");
+      const count = cleanOldData(90);
+      alert(`已清理 ${count} 条旧记录。`);
       renderManage();
     }
   });
 
-  document.getElementById('btnClearAll').addEventListener('click', async () => {
-    if (await clearAllData()) {
+  document.getElementById('btnClearAll').addEventListener('click', () => {
+    if (clearAllData()) {
       renderManage();
     }
   });
@@ -2354,7 +2181,7 @@ function renderQRCodes() {
 
   // 动态加载 qrcode 库并生成二维码
   loadQRCodeLib().then(() => {
-    DEVICES.forEach(async device => {
+    DEVICES.forEach(device => {
       const url = baseUrl + '#check/' + device.id;
       const container = document.getElementById('qrcode_' + device.id);
       if (container && typeof QRCode !== 'undefined') {
