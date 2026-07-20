@@ -1170,7 +1170,7 @@ a:hover { text-decoration: underline; }
   <script>
 
 // ===== 版本控制：自动绕过缓存 =====
-var APP_VERSION = "20260717003";
+var APP_VERSION = "20260717004";
 (function() {
   // 如果 URL 没有版本参数，自动加上
   if (window.location.search.indexOf("v=") === -1) {
@@ -1307,10 +1307,11 @@ async function fetchMonthRecords(year, month) {
   var monthStr = String(month).padStart(2, "0");
   var map = {};
   try {
-    var data = await supabaseQuery("check_records", "check_date=gte." + year + "-" + monthStr + "-01&check_date=lte." + year + "-" + monthStr + "-31&select=*");
+    var data = await supabaseQuery("check_records", "check_date=gte." + year + "-" + monthStr + "-01&check_date=lte." + year + "-" + monthStr + "-31&select=*&order=check_time.asc");
     (data || []).forEach(function(r) {
       if (!map[r.check_date]) map[r.check_date] = {};
-      map[r.check_date][r.device_id] = r;
+      if (!map[r.check_date][r.device_id]) map[r.check_date][r.device_id] = [];
+      map[r.check_date][r.device_id].push(r);
     });
   } catch (e) { console.error(e); }
   return map;
@@ -1327,18 +1328,31 @@ function getAllRecords() { return {}; }
 /** 保存全部数据 */
 function saveAllRecords(r) {}
 
-/** 获取某设备某天的记录 */
-async function getRecord(deviceId, dateStr) {
+/** 获取某设备某天的记录（返回所有班次的数组） */
+async function getRecords(deviceId, dateStr) {
   try {
-    var data = await supabaseQuery("check_records", "device_id=eq." + deviceId + "&check_date=eq." + dateStr + "&select=*");
+    var data = await supabaseQuery("check_records", "device_id=eq." + deviceId + "&check_date=eq." + dateStr + "&select=*&order=check_time.asc");
+    return (data || []).map(function(r) {
+      return { timestamp: r.check_time, technician: r.technician || '', shift: r.shift || '白班', items: r.items || {}, record_id: r.id };
+    });
+  } catch (e) { console.error("getRecords:", e); return []; }
+}
+
+/** 获取某设备某天某班次的记录（兼容旧接口） */
+async function getRecord(deviceId, dateStr, shift) {
+  try {
+    var query = "device_id=eq." + deviceId + "&check_date=eq." + dateStr;
+    if (shift) query += "&shift=eq." + shift;
+    query += "&select=*&limit=1";
+    var data = await supabaseQuery("check_records", query);
     if (data && data.length > 0) {
-      return { timestamp: data[0].check_time, technician: data[0].technician || '', shift: data[0].shift || '', items: data[0].items || {}, record_id: data[0].id };
+      return { timestamp: data[0].check_time, technician: data[0].technician || '', shift: data[0].shift || '白班', items: data[0].items || {}, record_id: data[0].id };
     }
     return null;
   } catch (e) { console.error("getRecord:", e); return null; }
 }
 
-/** 保存某设备某天的记录 */
+/** 保存某设备某天某班次的记录 */
 async function saveRecord(deviceId, dateStr, data) {
   try {
     await supabaseUpsert("check_records", {
@@ -1348,7 +1362,7 @@ async function saveRecord(deviceId, dateStr, data) {
       technician: data.technician || '',
       shift: data.shift || '白班',
       items: data.items
-    }, "device_id,check_date");
+    }, "device_id,check_date,shift");
     return true;
   } catch (e) { console.error("saveRecord:", e); alert("保存失败：" + e.message); return false; }
 }
@@ -1361,10 +1375,13 @@ async function getDeviceDates(deviceId) {
   } catch (e) { console.error(e); return []; }
 }
 
-/** 检查某设备今天是否已点检 */
-async function isCheckedToday(deviceId) {
-  var r = await getRecord(deviceId, getTodayStr());
-  return r !== null;
+/** 检查某设备今天某班次是否已点检 */
+async function isCheckedToday(deviceId, shift) {
+  var records = await getRecords(deviceId, getTodayStr());
+  if (shift) {
+    return records.some(function(r) { return r.shift === shift; });
+  }
+  return records.length > 0;
 }
 
 /** 获取今天日期字符串 */
@@ -1423,12 +1440,14 @@ async function getMonthStats(year, month) {
   var monthStr = String(month).padStart(2, "0");
   var daysInMonth = new Date(year, month, 0).getDate();
   var stats = {};
-  DEVICES.forEach(function(d) { stats[d.id] = { checked: 0, abnormal: 0, total: daysInMonth }; });
+  DEVICES.forEach(function(d) { stats[d.id] = { checked: 0, abnormal: 0, total: daysInMonth, dayChecked: 0, nightChecked: 0 }; });
   try {
-    var data = await supabaseQuery("check_records", "check_date=gte." + year + "-" + monthStr + "-01&check_date=lte." + year + "-" + monthStr + "-31&select=device_id,items");
+    var data = await supabaseQuery("check_records", "check_date=gte." + year + "-" + monthStr + "-01&check_date=lte." + year + "-" + monthStr + "-31&select=device_id,items,shift");
     (data || []).forEach(function(r) {
       if (stats[r.device_id]) {
         stats[r.device_id].checked++;
+        if (r.shift === "夜班") stats[r.device_id].nightChecked++;
+        else stats[r.device_id].dayChecked++;
         if (Object.values(r.items || {}).some(function(i) { return i.status === "abnormal"; })) stats[r.device_id].abnormal++;
       }
     });
@@ -1436,7 +1455,7 @@ async function getMonthStats(year, month) {
   return stats;
 }
 
-/** 获取某月每天各设备的点检状态（用于日历） */
+/** 获取某月每天各设备的点检状态（用于日历，支持白夜班） */
 async function getMonthDailyStatus(year, month) {
   var monthStr = String(month).padStart(2, "0");
   var startDate = year + "-" + monthStr + "-01";
@@ -1446,14 +1465,15 @@ async function getMonthDailyStatus(year, month) {
   for (var d = 1; d <= daysInMonth; d++) {
     var ds = year + "-" + monthStr + "-" + String(d).padStart(2, "0");
     daily[ds] = {};
-    DEVICES.forEach(function(dev) { daily[ds][dev.id] = "unchecked"; });
+    DEVICES.forEach(function(dev) { daily[ds][dev.id] = { day: "unchecked", night: "unchecked" }; });
   }
   try {
-    var data = await supabaseQuery("check_records", "check_date=gte." + startDate + "&check_date=lte." + endDate + "&select=device_id,check_date,items");
+    var data = await supabaseQuery("check_records", "check_date=gte." + startDate + "&check_date=lte." + endDate + "&select=device_id,check_date,items,shift");
     (data || []).forEach(function(r) {
-      if (daily[r.check_date]) {
+      if (daily[r.check_date] && daily[r.check_date][r.device_id]) {
         var ab = Object.values(r.items || {}).some(function(i) { return i.status === "abnormal"; });
-        daily[r.check_date][r.device_id] = ab ? "abnormal" : "normal";
+        var shiftKey = r.shift === "夜班" ? "night" : "day";
+        daily[r.check_date][r.device_id][shiftKey] = ab ? "abnormal" : "normal";
       }
     });
   } catch (e) { console.error(e); }
@@ -1487,8 +1507,10 @@ function importData(file) {
               device_id: data[i].device_id,
               check_date: data[i].check_date,
               check_time: data[i].check_time || data[i].timestamp,
+              technician: data[i].technician || '',
+              shift: data[i].shift || '白班',
               items: data[i].items
-            }, "device_id,check_date");
+            }, "device_id,check_date,shift");
             count++;
           } catch (err) {}
         }
@@ -1596,15 +1618,19 @@ function renderCheckForm(deviceId) {
 
   document.getElementById('app').innerHTML = html;
 
-  // 检查今日是否已点检
-  getRecord(deviceId, getTodayStr()).then(function(rec) {
+  // 检查今日是否已点检（显示两个班次状态）
+  getRecords(deviceId, getTodayStr()).then(function(records) {
     var hint = document.getElementById('todayStatus');
     if (hint) {
-      if (rec) {
-        var tech = rec.technician || '未知';
-        var shift = rec.shift || '';
-        var shiftIcon = shift === '夜班' ? '🌙' : '☀️';
-        hint.innerHTML = '⚠️ 今日已由 <b>' + tech + '</b>（' + shiftIcon + ' ' + shift + '）点检过！<br>再次提交将覆盖之前的记录。';
+      if (records.length > 0) {
+        var dayRec = null, nightRec = null;
+        records.forEach(function(r) { if (r.shift === '夜班') nightRec = r; else dayRec = r; });
+        var parts = [];
+        if (dayRec) parts.push('☀️ 白班：<b>' + (dayRec.technician || '未知') + '</b> 已点检');
+        else parts.push('☀️ 白班：未点检');
+        if (nightRec) parts.push('🌙 夜班：<b>' + (nightRec.technician || '未知') + '</b> 已点检');
+        else parts.push('🌙 夜班：未点检');
+        hint.innerHTML = '⚠️ 今日点检情况：<br>' + parts.join('<br>') + '<br><small>提交后将覆盖对应班次的记录</small>';
         hint.className = 'check-status-hint warned';
       } else {
         hint.innerHTML = '✅ 今日尚未点检，请完成点检后提交。';
@@ -1817,31 +1843,72 @@ async function renderDashboard() {
 
   // 四台设备卡片（先收集所有数据再渲染）
   for (const device of DEVICES) {
-    const record = await getRecord(device.id, today);
-    const checked = !!record;
-    let statusClass = 'unchecked';
-    let statusText = '未点检';
-    let detailHtml = '';
+    const records = await getRecords(device.id, today);
+    const checked = records.length > 0;
 
+    // 分别获取白班和夜班记录
+    var dayRecord = null, nightRecord = null;
+    records.forEach(function(r) {
+      if (r.shift === '夜班') nightRecord = r;
+      else dayRecord = r;
+    });
+
+    // 判断整体状态
+    var statusClass = 'unchecked';
+    var statusText = '未点检';
     if (checked) {
-      const items = record.items || {};
-      const abnormalCount = Object.values(items).filter(i => i.status === 'abnormal').length;
+      var allItems = [];
+      records.forEach(function(r) {
+        var items = r.items || {};
+        Object.values(items).forEach(function(i) { allItems.push(i); });
+      });
+      var abnormalCount = allItems.filter(function(i) { return i.status === 'abnormal'; }).length;
       if (abnormalCount > 0) {
         statusClass = 'abnormal';
-        statusText = `${abnormalCount}项异常`;
+        statusText = abnormalCount + '项异常';
       } else {
         statusClass = 'normal';
         statusText = '全部正常';
       }
-      // 统计照片总数
-      let totalPhotos = 0;
-      Object.values(items).forEach(function(it) {
-        if (it.photos && Array.isArray(it.photos)) totalPhotos += it.photos.length;
-      });
-      detailHtml = `<div class="card-time">${record.technician ? record.technician + ' · ' : ''}${record.shift || ''}</div><div class="card-time">${record.timestamp}</div>`;
-      if (totalPhotos > 0) {
-        detailHtml += `<div class="card-photos">📷 ${totalPhotos}张照片</div>`;
+    }
+
+    // 构建两个班次的详情
+    var detailHtml = '';
+    if (dayRecord || nightRecord) {
+      detailHtml += '<div style="display:flex; gap:12px; flex-wrap:wrap; margin-bottom:6px;">';
+      // 白班
+      if (dayRecord) {
+        var dAbnormal = Object.values(dayRecord.items || {}).filter(function(i) { return i.status === 'abnormal'; }).length;
+        var dPhotos = 0;
+        Object.values(dayRecord.items || {}).forEach(function(it) { if (it.photos && Array.isArray(it.photos)) dPhotos += it.photos.length; });
+        detailHtml += '<div style="flex:1; min-width:80px; padding:6px 8px; background:#f0f9ff; border-radius:6px; font-size:0.75rem;">';
+        detailHtml += '<div style="font-weight:600; color:#0369a1;">☀️ 白班</div>';
+        detailHtml += '<div style="color:#374151;">👤 ' + (dayRecord.technician || '—') + '</div>';
+        detailHtml += '<div style="color:#374151;">🕐 ' + (dayRecord.timestamp || '').substring(11, 16) + '</div>';
+        detailHtml += '<div style="color:' + (dAbnormal > 0 ? '#dc2626' : '#059669') + '; font-weight:500;">' + (dAbnormal > 0 ? '⚠ ' + dAbnormal + '项异常' : '✓ 正常') + '</div>';
+        if (dPhotos > 0) detailHtml += '<div>📷 ' + dPhotos + '张</div>';
+        detailHtml += '</div>';
+      } else {
+        detailHtml += '<div style="flex:1; min-width:80px; padding:6px 8px; background:#f9fafb; border-radius:6px; font-size:0.75rem; color:#9ca3af;">';
+        detailHtml += '<div style="font-weight:600;">☀️ 白班</div><div>未点检</div></div>';
       }
+      // 夜班
+      if (nightRecord) {
+        var nAbnormal = Object.values(nightRecord.items || {}).filter(function(i) { return i.status === 'abnormal'; }).length;
+        var nPhotos = 0;
+        Object.values(nightRecord.items || {}).forEach(function(it) { if (it.photos && Array.isArray(it.photos)) nPhotos += it.photos.length; });
+        detailHtml += '<div style="flex:1; min-width:80px; padding:6px 8px; background:#f5f3ff; border-radius:6px; font-size:0.75rem;">';
+        detailHtml += '<div style="font-weight:600; color:#6d28d9;">🌙 夜班</div>';
+        detailHtml += '<div style="color:#374151;">👤 ' + (nightRecord.technician || '—') + '</div>';
+        detailHtml += '<div style="color:#374151;">🕐 ' + (nightRecord.timestamp || '').substring(11, 16) + '</div>';
+        detailHtml += '<div style="color:' + (nAbnormal > 0 ? '#dc2626' : '#059669') + '; font-weight:500;">' + (nAbnormal > 0 ? '⚠ ' + nAbnormal + '项异常' : '✓ 正常') + '</div>';
+        if (nPhotos > 0) detailHtml += '<div>📷 ' + nPhotos + '张</div>';
+        detailHtml += '</div>';
+      } else {
+        detailHtml += '<div style="flex:1; min-width:80px; padding:6px 8px; background:#f9fafb; border-radius:6px; font-size:0.75rem; color:#9ca3af;">';
+        detailHtml += '<div style="font-weight:600;">🌙 夜班</div><div>未点检</div></div>';
+      }
+      detailHtml += '</div>';
     }
 
     html += `
@@ -1877,6 +1944,8 @@ async function renderDashboard() {
           </div>
         </div>
         <div class="calendar-legend">
+          <div class="legend-item" style="font-weight:600; color:#0369a1;">☀️ 白班</div>
+          <div class="legend-item" style="font-weight:600; color:#6d28d9;">🌙 夜班</div>
           ${DEVICES.map(d => `<span class="legend-item"><span class="legend-dot" style="background:${getDeviceColor(d.id)}"></span>${d.name.length > 8 ? d.name.substring(0,8)+'...' : d.name}</span>`).join('')}
         </div>
         <div class="calendar" id="calendar"></div>
@@ -1921,8 +1990,15 @@ async function renderDashboard() {
       calHtml += '<div class="cal-dots">';
 
       DEVICES.forEach(device => {
-        const s = status[device.id] || 'unchecked';
-        calHtml += `<span class="cal-dot ${s}" style="background:${s === 'unchecked' ? '#e5e7eb' : getDeviceColor(device.id)}" title="${device.name}: ${s === 'normal' ? '正常' : s === 'abnormal' ? '异常' : '未点检'}"></span>`;
+        var s = status[device.id] || { day: "unchecked", night: "unchecked" };
+        // 白班点
+        var dayColor = s.day === 'unchecked' ? '#e5e7eb' : (s.day === 'abnormal' ? '#dc2626' : getDeviceColor(device.id));
+        var dayOpacity = s.day === 'unchecked' ? '0.35' : '1';
+        calHtml += '<span class="cal-dot" style="background:' + dayColor + '; opacity:' + dayOpacity + '; border: 1px solid #0369a1;" title="' + device.name + ' 白班:' + (s.day === 'normal' ? '正常' : s.day === 'abnormal' ? '异常' : '未点检') + '"></span>';
+        // 夜班点
+        var nightColor = s.night === 'unchecked' ? '#e5e7eb' : (s.night === 'abnormal' ? '#dc2626' : getDeviceColor(device.id));
+        var nightOpacity = s.night === 'unchecked' ? '0.35' : '1';
+        calHtml += '<span class="cal-dot" style="background:' + nightColor + '; opacity:' + nightOpacity + '; border: 1px solid #6d28d9;" title="' + device.name + ' 夜班:' + (s.night === 'normal' ? '正常' : s.night === 'abnormal' ? '异常' : '未点检') + '"></span>';
       });
 
       calHtml += '</div></div>';
@@ -1941,38 +2017,37 @@ async function renderDashboard() {
   }
 
   async function showDateDetail(dateStr) {
-    const detailEl = document.getElementById('calendarDetail');
-    let detailHtml = `<h3>${dateStr} 点检详情</h3>`;
+    var detailEl = document.getElementById('calendarDetail');
+    var detailHtml = '<h3>' + dateStr + ' 点检详情</h3>';
 
-    let hasAny = false;
+    var hasAny = false;
     for (const device of DEVICES) {
-      const record = await getRecord(device.id, dateStr);
-      if (record) {
+      var records = await getRecords(device.id, dateStr);
+      if (records.length > 0) {
         hasAny = true;
-        const items = record.items || {};
-        const abnormalCount = Object.values(items).filter(i => i.status === 'abnormal').length;
-        detailHtml += `
-          <div class="detail-device">
-            <div class="detail-device-header">
-              <span class="detail-dot" style="background:${getDeviceColor(device.id)}"></span>
-              <strong>${device.name}</strong>
-              ${record.technician ? '<span class="detail-tech">👤 ' + record.technician + '</span>' : ''}
-              ${record.shift ? '<span class="detail-shift">' + (record.shift === '夜班' ? '🌙' : '☀️') + ' ' + record.shift + '</span>' : ''}
-              <span class="badge ${abnormalCount > 0 ? 'badge-danger' : 'badge-success'}">${abnormalCount > 0 ? abnormalCount + '项异常' : '正常'}</span>
-              <span class="detail-time">${record.timestamp}</span>
-            </div>
-        `;
-        device.checks.forEach((check, i) => {
-          const item = items[i] || { status: 'normal', note: '' };
-          detailHtml += `
-            <div class="detail-item ${item.status}">
-              <span>${item.status === 'normal' ? '✓' : '✗'}</span>
-              <span>${check}</span>
-              ${item.note ? `<span class="detail-note">${item.note}</span>` : ''}
-              ${item.photos && item.photos.length > 0 ? `<span class="detail-photos">📷${item.photos.length}张</span><div class="detail-photo-imgs">${item.photos.map(function(p){ return '<img src="'+p+'" class="detail-thumb" onclick="showPhotoModal(this.src)">'; }).join('')}</div>` : ''}
-            </div>
-          `;
+        // 分班次显示
+        var dayRec = null, nightRec = null;
+        records.forEach(function(r) { if (r.shift === '夜班') nightRec = r; else dayRec = r; });
+
+        detailHtml += '<div class="detail-device"><div class="detail-device-header"><span class="detail-dot" style="background:' + getDeviceColor(device.id) + '"></span><strong>' + device.name + '</strong></div>';
+
+        // 渲染每个班次
+        [ { rec: dayRec, label: '☀️ 白班' }, { rec: nightRec, label: '🌙 夜班' } ].forEach(function(si) {
+          if (!si.rec) {
+            detailHtml += '<div style="padding:4px 8px; font-size:0.8rem; color:#9ca3af;">' + si.label + '：未点检</div>';
+            return;
+          }
+          var items = si.rec.items || {};
+          var abnormalCount = Object.values(items).filter(function(i) { return i.status === 'abnormal'; }).length;
+          detailHtml += '<div style="padding:4px 8px; margin-bottom:4px; background:#f9fafb; border-radius:4px;">';
+          detailHtml += '<div style="font-size:0.82rem; font-weight:600; margin-bottom:2px;">' + si.label + ' · 👤 ' + (si.rec.technician || '—') + ' · 🕐 ' + (si.rec.timestamp || '') + ' <span class="badge ' + (abnormalCount > 0 ? 'badge-danger' : 'badge-success') + '">' + (abnormalCount > 0 ? abnormalCount + '项异常' : '正常') + '</span></div>';
+          device.checks.forEach(function(check, i) {
+            var item = items[i] || { status: 'normal', note: '' };
+            detailHtml += '<div class="detail-item ' + item.status + '"><span>' + (item.status === 'normal' ? '✓' : '✗') + '</span><span>' + check + '</span>' + (item.note ? '<span class="detail-note">' + item.note + '</span>' : '') + (item.photos && item.photos.length > 0 ? '<span class="detail-photos">📷' + item.photos.length + '张</span><div class="detail-photo-imgs">' + item.photos.map(function(p){ return '<img src="'+p+'" class="detail-thumb" onclick="showPhotoModal(this.src)">'; }).join('') + '</div>' : '') + '</div>';
+          });
+          detailHtml += '</div>';
         });
+
         detailHtml += '</div>';
       }
     }
@@ -2121,10 +2196,10 @@ function renderExport() {
 }
 
 async function generateReport(year, month) {
-  const allRecords = await fetchMonthRecords(year, month);
-  const daysInMonth = new Date(year, month, 0).getDate();
+  var allRecords = await fetchMonthRecords(year, month);
+  var daysInMonth = new Date(year, month, 0).getDate();
 
-  let html = `
+  var html = `
     <div class="report-container">
       <div class="report-header">
         <h2>设备点检月报表</h2>
@@ -2136,55 +2211,78 @@ async function generateReport(year, month) {
         <thead>
           <tr>
             <th>日期</th>
+            <th>班次</th>
             ${DEVICES.map(d => `<th>${d.name.length > 10 ? d.name.substring(0, 10) + '...' : d.name}</th>`).join('')}
             <th>点检人</th>
-            <th>班次</th>
             <th>汇总</th>
           </tr>
         </thead>
         <tbody>
   `;
 
-  for (let d = 1; d <= daysInMonth; d++) {
-    const dateStr = `${year}-${String(month).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
-    const dayOfWeek = ['日', '一', '二', '三', '四', '五', '六'][new Date(year, month - 1, d).getDay()];
+  // 汇总统计
+  var monthSummary = {};
+  DEVICES.forEach(function(d) { monthSummary[d.id] = { dayChecked: 0, nightChecked: 0, dayAbnormal: 0, nightAbnormal: 0, totalDays: daysInMonth }; });
 
-    html += `<tr>
-      <td class="date-cell">
-        <span class="date-day">${d}</span>
-        <span class="date-week">周${dayOfWeek}</span>
-      </td>`;
+  for (var d = 1; d <= daysInMonth; d++) {
+    var dateStr = year + '-' + String(month).padStart(2, '0') + '-' + String(d).padStart(2, '0');
+    var dayOfWeek = ['日', '一', '二', '三', '四', '五', '六'][new Date(year, month - 1, d).getDay()];
 
-    let daySummary = { checked: 0, abnormal: 0 };
-    let dayTech = '';
-    let dayShift = '';
-
-    DEVICES.forEach(device => {
-      const record = (allRecords[dateStr] && allRecords[dateStr][device.id]) || null;
-
-      if (record) {
-        daySummary.checked++;
-        if (record.technician) dayTech = record.technician;
-        if (record.shift) dayShift = record.shift;
-        const items = record.items || {};
-        const hasAbnormal = Object.values(items).some(i => i.status === 'abnormal');
+    // 白班行
+    var dayHasAny = false;
+    var dayHtml = '<tr><td class="date-cell" rowspan="2"><span class="date-day">' + d + '</span><span class="date-week">周' + dayOfWeek + '</span></td><td style="background:#f0f9ff; font-weight:600; color:#0369a1;">☀️ 白班</td>';
+    var dayTech = '';
+    DEVICES.forEach(function(device) {
+      var recs = (allRecords[dateStr] && allRecords[dateStr][device.id]) || [];
+      var dayRec = null;
+      recs.forEach(function(r) { if (r.shift !== '夜班') dayRec = r; });
+      if (dayRec) {
+        dayHasAny = true;
+        if (dayRec.technician) dayTech = dayRec.technician;
+        var items = dayRec.items || {};
+        var hasAbnormal = Object.values(items).some(function(i) { return i.status === 'abnormal'; });
         if (hasAbnormal) {
-          daySummary.abnormal++;
-          html += `<td class="cell-abnormal">⚠ 异常</td>`;
+          monthSummary[device.id].dayAbnormal++;
+          dayHtml += '<td class="cell-abnormal">⚠ 异常</td>';
         } else {
-          html += `<td class="cell-normal">✓ 正常</td>`;
+          dayHtml += '<td class="cell-normal">✓ 正常</td>';
         }
       } else {
-        html += `<td class="cell-unchecked">—</td>`;
+        dayHtml += '<td class="cell-unchecked">—</td>';
       }
     });
+    dayHtml += '<td class="cell-tech">' + dayTech + '</td>';
+    dayHtml += '<td class="cell-summary">' + (dayHasAny ? '已检' : '未点检') + '</td></tr>';
+    if (dayHasAny) DEVICES.forEach(function(dev) { monthSummary[dev.id].dayChecked++; });
 
-    const summaryText = daySummary.checked === 0 ? '未点检'
-      : daySummary.checked === 4 && daySummary.abnormal === 0 ? '全部正常'
-      : `${daySummary.checked}/4已检 ${daySummary.abnormal > 0 ? daySummary.abnormal + '项异常' : ''}`;
-    html += `<td class="cell-tech">${dayTech}</td><td class="cell-shift">${dayShift}</td><td class="cell-summary">${summaryText}</td>`;
+    // 夜班行
+    var nightHasAny = false;
+    var nightHtml = '<tr><td style="background:#f5f3ff; font-weight:600; color:#6d28d9;">🌙 夜班</td>';
+    var nightTech = '';
+    DEVICES.forEach(function(device) {
+      var recs = (allRecords[dateStr] && allRecords[dateStr][device.id]) || [];
+      var nightRec = null;
+      recs.forEach(function(r) { if (r.shift === '夜班') nightRec = r; });
+      if (nightRec) {
+        nightHasAny = true;
+        if (nightRec.technician) nightTech = nightRec.technician;
+        var items = nightRec.items || {};
+        var hasAbnormal = Object.values(items).some(function(i) { return i.status === 'abnormal'; });
+        if (hasAbnormal) {
+          monthSummary[device.id].nightAbnormal++;
+          nightHtml += '<td class="cell-abnormal">⚠ 异常</td>';
+        } else {
+          nightHtml += '<td class="cell-normal">✓ 正常</td>';
+        }
+      } else {
+        nightHtml += '<td class="cell-unchecked">—</td>';
+      }
+    });
+    nightHtml += '<td class="cell-tech">' + nightTech + '</td>';
+    nightHtml += '<td class="cell-summary">' + (nightHasAny ? '已检' : '未点检') + '</td></tr>';
+    if (nightHasAny) DEVICES.forEach(function(dev) { monthSummary[dev.id].nightChecked++; });
 
-    html += '</tr>';
+    html += dayHtml + nightHtml;
   }
 
   html += `
@@ -2196,28 +2294,19 @@ async function generateReport(year, month) {
         <div class="summary-grid">
   `;
 
-  DEVICES.forEach(device => {
-    let checked = 0, abnormal = 0;
-    for (let d = 1; d <= daysInMonth; d++) {
-      const dateStr = `${year}-${String(month).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
-      if (allRecords[dateStr] && allRecords[dateStr][device.id]) {
-        checked++;
-        const items = allRecords[dateStr][device.id].items || {};
-        if (Object.values(items).some(i => i.status === 'abnormal')) abnormal++;
-      }
-    }
-    html += `
-      <div class="summary-card">
-        <div class="summary-name">${device.name.length > 10 ? device.name.substring(0, 10) + '...' : device.name}</div>
-        <div class="summary-nums">
-          <span class="summary-checked">${checked}/${daysInMonth}天已检</span>
-          ${abnormal > 0 ? `<span class="summary-abnormal">${abnormal}天异常</span>` : ''}
-        </div>
-        <div class="summary-bar">
-          <div class="bar-fill" style="width:${Math.round(checked / daysInMonth * 100)}%; background:${getDeviceColor(device.id)}"></div>
-        </div>
-      </div>
-    `;
+  DEVICES.forEach(function(device) {
+    var s = monthSummary[device.id];
+    html += '<div class="summary-card">';
+    html += '<div class="summary-name">' + (device.name.length > 10 ? device.name.substring(0, 10) + '...' : device.name) + '</div>';
+    html += '<div class="summary-nums"><span class="summary-checked">☀️白班 ' + s.dayChecked + '/' + s.totalDays + '天</span>';
+    if (s.dayAbnormal > 0) html += '<span class="summary-abnormal">异常' + s.dayAbnormal + '天</span>';
+    html += '</div>';
+    html += '<div class="summary-bar"><div class="bar-fill" style="width:' + Math.round(s.dayChecked / s.totalDays * 100) + '%; background:' + getDeviceColor(device.id) + '"></div></div>';
+    html += '<div class="summary-nums" style="margin-top:4px;"><span class="summary-checked">🌙夜班 ' + s.nightChecked + '/' + s.totalDays + '天</span>';
+    if (s.nightAbnormal > 0) html += '<span class="summary-abnormal">异常' + s.nightAbnormal + '天</span>';
+    html += '</div>';
+    html += '<div class="summary-bar"><div class="bar-fill" style="width:' + Math.round(s.nightChecked / s.totalDays * 100) + '%; background:' + getDeviceColor(device.id) + '; opacity:0.5;"></div></div>';
+    html += '</div>';
   });
 
   html += `
@@ -2231,232 +2320,44 @@ async function generateReport(year, month) {
   document.getElementById('btnPrint').style.display = 'inline-block';
 
   // CSV导出
-  document.getElementById('btnExportCSV').onclick = () => exportCSV(year, month);
+  document.getElementById('btnExportCSV').onclick = function() { exportCSV(year, month); };
 
   // 打印
-  document.getElementById('btnPrint').onclick = () => {
-    const reportHtml = document.getElementById('reportArea').innerHTML;
-    const printWin = window.open('', '_blank');
-    printWin.document.write(`
-      <html>
-        <head><title>设备点检月报表 ${year}年${month}月</title>
-        <style>
-          body { font-family: 'Microsoft YaHei', sans-serif; padding: 20px; }
-          table { border-collapse: collapse; width: 100%; }
-          th, td { border: 1px solid #333; padding: 6px 8px; text-align: center; font-size: 12px; }
-          th { background: #f0f0f0; }
-          .cell-normal { color: #059669; }
-          .cell-abnormal { color: #dc2626; font-weight: bold; }
-          .cell-unchecked { color: #999; }
-          .report-header { text-align: center; margin-bottom: 20px; }
-          .report-summary { margin-top: 30px; }
-          .summary-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; }
-          .summary-card { border: 1px solid #ddd; padding: 10px; border-radius: 6px; }
-          .summary-bar { height: 8px; background: #e5e7eb; border-radius: 4px; margin-top: 6px; }
-          .bar-fill { height: 100%; border-radius: 4px; }
-          @media print { body { padding: 0; } }
-        
-/* --- Photo thumbnails in dashboard --- */
-.card-photos {
-  font-size: 0.75rem;
-  color: #6b7280;
-  margin-bottom: 4px;
-}
-
-.detail-photo-imgs {
-  display: flex;
-  gap: 4px;
-  flex-wrap: wrap;
-  margin-top: 4px;
-}
-
-.detail-thumb {
-  width: 50px;
-  height: 50px;
-  object-fit: cover;
-  border-radius: 4px;
-  border: 1px solid #e5e7eb;
-  cursor: pointer;
-}
-
-.history-photos {
-  display: flex;
-  gap: 4px;
-  flex-wrap: wrap;
-  margin-top: 4px;
-  margin-left: 20px;
-}
-
-.history-thumb {
-  width: 60px;
-  height: 60px;
-  object-fit: cover;
-  border-radius: 4px;
-  border: 1px solid #e5e7eb;
-  cursor: pointer;
-}
-
-.detail-thumb:hover, .history-thumb:hover {
-  transform: scale(1.1);
-  transition: transform 0.2s;
-}
-
-  
-/* --- Photo Modal --- */
-.photo-modal {
-  display: none;
-  position: fixed;
-  top: 0; left: 0; right: 0; bottom: 0;
-  background: rgba(0,0,0,0.9);
-  z-index: 9999;
-  justify-content: center;
-  align-items: center;
-  flex-direction: column;
-}
-.photo-modal.show { display: flex; }
-.photo-modal img {
-  max-width: 95vw;
-  max-height: 85vh;
-  border-radius: 8px;
-}
-.photo-modal-close {
-  position: absolute;
-  top: 20px; right: 30px;
-  color: white;
-  font-size: 36px;
-  cursor: pointer;
-  font-weight: bold;
-}
-.photo-modal-hint {
-  color: #ccc;
-  margin-top: 12px;
-  font-size: 0.85rem;
-}
-
-  
-/* --- Identity input --- */
-.check-identity {
-  background: white;
-  border-radius: var(--radius);
-  box-shadow: var(--shadow);
-  padding: 14px;
-  margin-bottom: 12px;
-}
-.identity-row {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  margin-bottom: 8px;
-}
-.identity-row:last-child { margin-bottom: 0; }
-.identity-label {
-  font-weight: 600;
-  font-size: 0.85rem;
-  white-space: nowrap;
-  min-width: 70px;
-}
-.identity-input {
-  flex: 1;
-  padding: 8px 12px;
-  border: 1px solid var(--gray-300);
-  border-radius: var(--radius);
-  font-size: 0.9rem;
-  font-family: inherit;
-}
-.identity-input:focus {
-  outline: none;
-  border-color: var(--primary);
-  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1);
-}
-.shift-btns {
-  display: flex;
-  gap: 8px;
-}
-.btn-shift {
-  padding: 8px 18px;
-  border: 1px solid var(--gray-300);
-  border-radius: var(--radius);
-  font-size: 0.85rem;
-  cursor: pointer;
-  background: white;
-  transition: all 0.2s;
-}
-.btn-shift.active {
-  background: var(--primary);
-  color: white;
-  border-color: var(--primary);
-}
-.detail-tech, .detail-shift {
-  font-size: 0.75rem;
-  color: var(--gray-600);
-  margin-left: 8px;
-}
-.cell-tech, .cell-shift {
-  font-size: 0.75rem;
-  color: var(--gray-600);
-}
-
-  
-.check-status-hint {
-  margin-top: 8px;
-  padding: 8px 12px;
-  border-radius: 6px;
-  font-size: 0.82rem;
-  font-weight: 500;
-}
-.check-status-hint.warned {
-  background: #fef3c7;
-  color: #92400e;
-  border: 1px solid #fcd34d;
-}
-.check-status-hint.ok {
-  background: #d1fae5;
-  color: #065f46;
-  border: 1px solid #6ee7b7;
-}
-
-  
-.clean-row {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-  </style></head>
-        <body>${reportHtml}</body>
-      </html>
-    `);
+  document.getElementById('btnPrint').onclick = function() {
+    var content = document.getElementById('reportArea').innerHTML;
+    var printWin = window.open('', '_blank');
+    printWin.document.write('<html><head><title>设备点检月报表 ' + year + '年' + month + '月</title><style>body{font-family:"Microsoft YaHei",sans-serif;padding:20px;}table{border-collapse:collapse;width:100%;}th,td{border:1px solid #333;padding:6px 8px;text-align:center;font-size:12px;}th{background:#f0f0f0;}.cell-normal{color:#059669;}.cell-abnormal{color:#dc2626;font-weight:bold;}.cell-unchecked{color:#999;}.report-header{text-align:center;margin-bottom:20px;}.report-summary{margin-top:30px;}.summary-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:12px;}.summary-card{border:1px solid #ddd;padding:10px;border-radius:6px;}.summary-bar{height:8px;background:#e5e7eb;border-radius:4px;margin-top:6px;}.bar-fill{height:100%;border-radius:4px;}@media print{body{padding:0;}}</style></head><body>' + content + '</body></html>');
     printWin.document.close();
     printWin.focus();
-    setTimeout(() => printWin.print(), 500);
+    setTimeout(function() { printWin.print(); }, 500);
   };
 }
 
 async function exportCSV(year, month) {
-  const allRecords = await fetchMonthRecords(year, month);
-  const daysInMonth = new Date(year, month, 0).getDate();
+  var allRecords = await fetchMonthRecords(year, month);
+  var daysInMonth = new Date(year, month, 0).getDate();
 
   // BOM for Excel Chinese support
-  let csv = '\uFEFF';
-  csv += '日期,';
-  DEVICES.forEach(d => { csv += `"${d.name}",`; });
-  csv += '点检人,班次,汇总\n';
+  var csv = '\uFEFF';
+  csv += '日期,班次,';
+  DEVICES.forEach(function(d) { csv += '"' + d.name + '",'; });
+  csv += '点检人,汇总\n';
 
-  for (let d = 1; d <= daysInMonth; d++) {
-    const dateStr = `${year}-${String(month).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
-    csv += `${dateStr},`;
-    let checked = 0, abnormal = 0;
-    let csvTech = '', csvShift = '';
+  for (var d = 1; d <= daysInMonth; d++) {
+    var dateStr = year + '-' + String(month).padStart(2, '0') + '-' + String(d).padStart(2, '0');
 
-    DEVICES.forEach(device => {
-      const record = (allRecords[dateStr] && allRecords[dateStr][device.id]) || null;
-      if (record) {
-        checked++;
-        if (record.technician) csvTech = record.technician;
-        if (record.shift) csvShift = record.shift;
-        const items = record.items || {};
-        if (Object.values(items).some(i => i.status === 'abnormal')) {
-          abnormal++;
+    // 白班行
+    csv += dateStr + ',白班,';
+    var dayChecked = 0, dayTech = '';
+    DEVICES.forEach(function(device) {
+      var recs = (allRecords[dateStr] && allRecords[dateStr][device.id]) || [];
+      var dayRec = null;
+      recs.forEach(function(r) { if (r.shift !== '夜班') dayRec = r; });
+      if (dayRec) {
+        dayChecked++;
+        if (dayRec.technician) dayTech = dayRec.technician;
+        var items = dayRec.items || {};
+        if (Object.values(items).some(function(i) { return i.status === 'abnormal'; })) {
           csv += '异常,';
         } else {
           csv += '正常,';
@@ -2465,17 +2366,40 @@ async function exportCSV(year, month) {
         csv += '未点检,';
       }
     });
+    csv += dayTech + ',';
+    csv += dayChecked === 0 ? '未点检' : (dayChecked + '/4已检');
+    csv += '\n';
 
-    csv += `${csvTech},${csvShift},`;
-    csv += checked === 0 ? '未点检' : `${checked}/4已检`;
+    // 夜班行
+    csv += dateStr + ',夜班,';
+    var nightChecked = 0, nightTech = '';
+    DEVICES.forEach(function(device) {
+      var recs = (allRecords[dateStr] && allRecords[dateStr][device.id]) || [];
+      var nightRec = null;
+      recs.forEach(function(r) { if (r.shift === '夜班') nightRec = r; });
+      if (nightRec) {
+        nightChecked++;
+        if (nightRec.technician) nightTech = nightRec.technician;
+        var items = nightRec.items || {};
+        if (Object.values(items).some(function(i) { return i.status === 'abnormal'; })) {
+          csv += '异常,';
+        } else {
+          csv += '正常,';
+        }
+      } else {
+        csv += '未点检,';
+      }
+    });
+    csv += nightTech + ',';
+    csv += nightChecked === 0 ? '未点检' : (nightChecked + '/4已检');
     csv += '\n';
   }
 
-  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
+  var blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
+  var url = URL.createObjectURL(blob);
+  var a = document.createElement('a');
   a.href = url;
-  a.download = `设备点检月报_${year}年${month}月.csv`;
+  a.download = '设备点检月报_' + year + '年' + month + '月.csv';
   a.click();
   URL.revokeObjectURL(url);
 }
