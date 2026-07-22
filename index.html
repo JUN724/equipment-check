@@ -1170,7 +1170,7 @@ a:hover { text-decoration: underline; }
   <script>
 
 // ===== 版本控制：自动绕过缓存 =====
-var APP_VERSION = "20260721001";
+var APP_VERSION = "20260722001";
 (function() {
   // 如果 URL 没有版本参数，自动加上
   if (window.location.search.indexOf("v=") === -1) {
@@ -2084,15 +2084,20 @@ async function renderDashboard() {
 
 /** 设备历史记录页 */
 async function renderHistory(deviceId) {
-  const device = getDeviceById(deviceId);
+  var device = getDeviceById(deviceId);
   if (!device) {
     document.getElementById('app').innerHTML = '<div class="empty-state"><p>设备不存在</p></div>';
     return;
   }
 
-  const dates = (await getDeviceDates(deviceId)).reverse(); // 最新在前
+  // 直接获取该设备所有记录，按时间倒序（最新在前）
+  var allRecords = [];
+  try {
+    var data = await supabaseQuery("check_records", "device_id=eq." + deviceId + "&select=*&order=check_time.desc");
+    allRecords = data || [];
+  } catch (e) { console.error(e); }
 
-  let html = `
+  var html = `
     <div class="page history-page">
       <div class="page-header">
         <a href="#dashboard" class="back-btn">&larr; 返回</a>
@@ -2100,33 +2105,34 @@ async function renderHistory(deviceId) {
       </div>
   `;
 
-  if (dates.length === 0) {
+  if (allRecords.length === 0) {
     html += '<div class="empty-state"><p>暂无点检记录</p></div>';
   } else {
     html += '<div class="history-list">';
-    for (const dateStr of dates) {
-      const record = await getRecord(deviceId, dateStr);
-      const items = record.items || {};
-      const abnormalCount = Object.values(items).filter(i => i.status === 'abnormal').length;
+    for (var ri = 0; ri < allRecords.length; ri++) {
+      var r = allRecords[ri];
+      var items = r.items || {};
+      var abnormalCount = Object.values(items).filter(function(i) { return i.status === 'abnormal'; }).length;
+      var shiftIcon = r.shift === '夜班' ? '🌙' : '☀️';
 
       html += `
         <div class="history-card">
           <div class="history-header">
-            <span class="history-date">📅 ${dateStr}</span>
-            <span class="history-time">${record.technician ? '👤 ' + record.technician + ' · ' : ''}${record.shift || ''} · ${record.timestamp}</span>
+            <span class="history-date">📅 ${r.check_date} ${shiftIcon}${r.shift || '白班'}</span>
+            <span class="history-time">${r.technician ? '👤 ' + r.technician + ' · ' : ''}${r.check_time}</span>
             <span class="badge ${abnormalCount > 0 ? 'badge-danger' : 'badge-success'}">${abnormalCount > 0 ? abnormalCount + '项异常' : '正常'}</span>
           </div>
           <div class="history-items">
       `;
 
-      device.checks.forEach((check, i) => {
-        const item = items[i] || { status: 'normal', note: '' };
+      device.checks.forEach(function(check, i) {
+        var item = items[i] || { status: 'normal', note: '' };
         html += `
           <div class="history-item ${item.status}">
             <span class="item-status">${item.status === 'normal' ? '✓' : '✗'}</span>
             <span class="item-text">${check}</span>
-            ${item.note ? `<span class="item-note">备注：${item.note}</span>` : ''}
-            ${item.photos && item.photos.length > 0 ? `<div class="history-photos">${item.photos.map(function(p){ return '<img src="'+p+'" class="history-thumb" onclick="showPhotoModal(this.src)">'; }).join('')}</div>` : ''}
+            ${item.note ? '<span class="item-note">备注：' + item.note + '</span>' : ''}
+            ${item.photos && item.photos.length > 0 ? '<div class="history-photos">' + item.photos.map(function(p){ return '<img src="'+p+'" class="history-thumb" onclick="showPhotoModal(this.src)">'; }).join('') + '</div>' : ''}
           </div>
         `;
       });
