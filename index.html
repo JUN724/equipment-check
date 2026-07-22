@@ -1170,7 +1170,7 @@ a:hover { text-decoration: underline; }
   <script>
 
 // ===== 版本控制：自动绕过缓存 =====
-var APP_VERSION = "20260722002";
+var APP_VERSION = "20260722003";
 (function() {
   // 如果 URL 没有版本参数，自动加上
   if (window.location.search.indexOf("v=") === -1) {
@@ -2414,7 +2414,7 @@ async function exportCSV(year, month) {
 async function renderManage() {
   var totalRecords = 0, sizeText = "计算中...";
   // 先渲染基础页面，再异步更新统计
-  var baseHtml = `
+  var html = `
     <div class="page manage-page">
       <div class="page-header">
         <a href="#dashboard" class="back-btn">&larr; 返回</a>
