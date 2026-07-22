@@ -1170,7 +1170,7 @@ a:hover { text-decoration: underline; }
   <script>
 
 // ===== 版本控制：自动绕过缓存 =====
-var APP_VERSION = "20260722001";
+var APP_VERSION = "20260722002";
 (function() {
   // 如果 URL 没有版本参数，自动加上
   if (window.location.search.indexOf("v=") === -1) {
@@ -2412,14 +2412,9 @@ async function exportCSV(year, month) {
 
 /** 管理页 */
 async function renderManage() {
-  let totalRecords = 0, sizeKB = "0";
-  try {
-    const data = await supabaseQuery("check_records", "select=id");
-    totalRecords = (data || []).length;
-    sizeKB = (totalRecords * 2 / 1024).toFixed(1);
-  } catch (e) {}
-
-  let html = `
+  var totalRecords = 0, sizeText = "计算中...";
+  // 先渲染基础页面，再异步更新统计
+  var baseHtml = `
     <div class="page manage-page">
       <div class="page-header">
         <a href="#dashboard" class="back-btn">&larr; 返回</a>
@@ -2437,11 +2432,11 @@ async function renderManage() {
         <div class="data-info">
           <div class="info-item">
             <span class="info-label">点检记录总数：</span>
-            <span class="info-value">${totalRecords} 条</span>
+            <span class="info-value" id="infoTotalRecords">计算中...</span>
           </div>
           <div class="info-item">
-            <span class="info-label">存储占用：</span>
-            <span class="info-value">约 ${sizeKB} KB</span>
+            <span class="info-label">存储占用（含照片）：</span>
+            <span class="info-value" id="infoStorageSize">计算中...</span>
           </div>
         </div>
         <div class="data-actions">
@@ -2526,6 +2521,37 @@ async function renderManage() {
       renderManage();
     }
   });
+
+  // 异步加载真实存储统计
+  loadStorageStats();
+}
+
+/** 加载真实存储统计 */
+async function loadStorageStats() {
+  try {
+    var data = await supabaseQuery("check_records", "select=*");
+    var totalRecords = (data || []).length;
+    // 计算真实 JSON 大小（包括 Base64 照片数据）
+    var totalBytes = new Blob([JSON.stringify(data)]).size;
+    var sizeText = formatBytes(totalBytes);
+
+    var elRecords = document.getElementById('infoTotalRecords');
+    var elSize = document.getElementById('infoStorageSize');
+    if (elRecords) elRecords.textContent = totalRecords + ' 条';
+    if (elSize) elSize.textContent = sizeText;
+  } catch (e) {
+    var elRecords = document.getElementById('infoTotalRecords');
+    var elSize = document.getElementById('infoStorageSize');
+    if (elRecords) elRecords.textContent = '加载失败';
+    if (elSize) elSize.textContent = '加载失败';
+  }
+}
+
+/** 字节数格式化 */
+function formatBytes(bytes) {
+  if (bytes < 1024) return bytes + ' B';
+  if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
+  return (bytes / (1024 * 1024)).toFixed(2) + ' MB';
 }
 
 /** 生成二维码打印页 */
