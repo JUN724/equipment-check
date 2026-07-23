@@ -1,0 +1,17 @@
+name: Keep Supabase Alive
+
+on:
+  schedule:
+    # 每6小时执行一次 (UTC时间)
+    - cron: '0 */6 * * *'
+  workflow_dispatch:
+
+jobs:
+  ping-supabase:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping Supabase API
+        run: |
+          curl -s -o /dev/null -w "HTTP Status: %{http_code}\n" \
+            "https://mrbrkxfsjdfrwxksvvsi.supabase.co/rest/v1/check_records?select=id&limit=1" \
+            -H "apikey: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1yYnJreGZzamRmcnd4a3N2dnNpIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODQyNjIzNzQsImV4cCI6MjA5OTgzODM3NH0.rh4AwOCxFz7jcnqoCEDn5hl1XQXOLOLVF8ADbx2yEPs"
